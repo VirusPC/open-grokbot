@@ -515,23 +515,42 @@ h3 {
 
 .peers-pane .pane-scroll {
   overflow-anchor: none;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
 }
 
 .room-block {
-  margin-top: 8px;
+  margin-top: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-/* In the room, the composer sits under the thread. A sticky bottom inside
-   the scrolling pane left a tall blank under the messages after Enter. */
-.room-block .composer {
-  position: static;
+/* Composer stays outside the scroller. An in-flow textarea at the bottom
+   let Enter jump scrollTop into the blank under the thread. */
+.room-dock-slot {
+  flex: none;
+}
+
+.room-dock {
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  padding: 8px 16px calc(10px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 42vh;
+  overflow: auto;
+}
+
+.room-dock .composer,
+.room-dock .banner {
+  margin: 0;
   padding: 0;
 }
 
-.room-block textarea {
+.room-dock textarea {
   resize: none;
   max-height: 7.5rem;
   overflow: auto;
@@ -629,7 +648,8 @@ h3 {
   .tabbar button { text-align: left; padding: 12px 14px; }
 
   .pane-scroll,
-  .composer { padding-left: 18px; padding-right: 0; }
+  .composer,
+  .room-dock { padding-left: 18px; padding-right: 0; }
 
   .banner { margin-left: 18px; margin-right: 0; }
 

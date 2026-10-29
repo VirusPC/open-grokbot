@@ -92,6 +92,8 @@ async function handleRoom(
     const result = await room.postMessage({
       text: typeof body.text === "string" ? body.text : undefined,
       authorId: typeof body.authorId === "string" ? body.authorId : undefined,
+      // The page returns before model wakes. curl still wants the peer lines.
+      waitForPeers: true,
     });
     return Response.json(result, { status: result.ok ? 200 : 400 });
   }

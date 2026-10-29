@@ -1,4 +1,5 @@
 import { Agent, callable, getAgentByName } from "agents";
+import { linesFromFanout, settleFanout } from "./fanout";
 import { selectWakeThread } from "./peer-reply";
 import {
   MAX_ROOM_MESSAGES,
@@ -9,21 +10,27 @@ import {
   normalizePostText,
   normalizeTeammateId,
   planHandoff,
+  type HandoffRule,
   type OpenResult,
   type PostResult,
   type RoomMessage,
   type RoomState,
   type WakeMember,
-  type WakeReceipt,
+  type WakeTurn,
 } from "./peer-types";
 
 /**
  * Channel / ingress for peer mode. Members and the transcript live here.
  *
  * postMessage does not run inside a Desk Think turn:
- *   1. planHandoff decides broadcast vs @-only
- *   2. getAgentByName(env.PeerAgent, id) wakes each target
- *   3. the peer returns a line that answers `text`; this room appends it
+ *   1. planHandoff decides broadcast (every member) vs @-only (named subset)
+ *   2. both rules call the same Promise.allSettled fan-out
+ *   3. getAgentByName(env.PeerAgent, id) wakes each target together
+ *   4. the peer returns a line that answers `text`; this room appends it
+ *
+ * The browser RPC returns after the human line is stored. Model time runs
+ * in ctx.waitUntil, and setState pushes each batch of peer lines. One
+ * peer's failure is a system line and does not cancel the others.
  *
  * The peer does not fetch this room back. A Durable Object waiting on its
  * own stub deadlocks the input gate. The room passes a snapshot of earlier
@@ -84,7 +91,12 @@ export class RoomAgent extends Agent<Env, RoomState> {
   }
 
   @callable()
-  async postMessage(input?: { text?: string; authorId?: string }): Promise<PostResult> {
+  async postMessage(input?: {
+    text?: string;
+    authorId?: string;
+    /** HTTP curl waits for peer lines. The browser RPC must not. */
+    waitForPeers?: boolean;
+  }): Promise<PostResult> {
     if (!this.state.opened) {
       return { ok: false, error: "这个房间还没打开。" };
     }
@@ -103,57 +115,23 @@ export class RoomAgent extends Agent<Env, RoomState> {
     }));
     const thread = selectWakeThread(this.state.messages, names);
     const plan = planHandoff(text, this.state.memberIds, teammates);
-    const messages: RoomMessage[] = [
-      ...this.state.messages,
+    const humanId = crypto.randomUUID();
+    const batch: RoomMessage[] = [
       {
-        id: crypto.randomUUID(),
+        id: humanId,
         authorId,
         text,
         createdAt: new Date().toISOString(),
         kind: "human",
-        handoff: { rule: plan.rule, targets: plan.targets },
+        handoff: { rule: plan.rule, targets: [...plan.targets] },
       },
     ];
 
     for (const token of plan.unknown) {
-      messages.push(systemMessage(`不认识 @${token}，登记表里没有这个同事。`));
+      batch.push(systemMessage(`不认识 @${token}，登记表里没有这个同事。`));
     }
     for (const id of plan.outsideRoom) {
-      messages.push(systemMessage(`@${id} 在登记表里，但不在这个房间，所以没有叫醒。`));
-    }
-
-    const receipts: WakeReceipt[] = [];
-    for (const id of plan.targets) {
-      try {
-        const peer = await getAgentByName(this.env.PeerAgent, id);
-        const mate = teammates.find((item) => item.id === id);
-        const wake = await peer.wake({
-          kind: "room",
-          text,
-          room: this.name,
-          from: authorId,
-          displayName: mate?.displayName ?? names.get(id) ?? id,
-          tags: mate ? [...mate.tags] : [],
-          members,
-          thread,
-        });
-        receipts.push({ id, at: wake.wokeAt, kind: "room" });
-        messages.push({
-          id: crypto.randomUUID(),
-          authorId: id,
-          text: wake.reply,
-          createdAt: wake.wokeAt,
-          kind: "peer",
-          handoff: null,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        messages.push(systemMessage(`叫醒 ${id} 失败：${message}`));
-      }
-    }
-
-    if (receipts.length > 0) {
-      await registry.recordWakes(receipts);
+      batch.push(systemMessage(`@${id} 在登记表里，但不在这个房间，所以没有叫醒。`));
     }
     if (
       plan.rule === "mentions" &&
@@ -161,19 +139,100 @@ export class RoomAgent extends Agent<Env, RoomState> {
       plan.unknown.length === 0 &&
       plan.outsideRoom.length === 0
     ) {
-      messages.push(systemMessage("写了 @，但没有点到房间里的同事。"));
+      batch.push(systemMessage("写了 @，但没有点到房间里的同事。"));
     }
 
-    const next = this.commit(messages, this.state.memberIds, true);
-    console.log(
-      JSON.stringify({
-        event: "room.handoff",
-        room: this.name,
-        rule: plan.rule,
-        targets: plan.targets,
-      }),
-    );
+    const anchorId = batch[batch.length - 1]?.id ?? humanId;
+    const next = this.appendMessages(batch);
+    if (plan.targets.length === 0) return { ok: true, state: next };
+
+    const job = this.finishHandoff({
+      humanId,
+      anchorId,
+      text,
+      authorId,
+      rule: plan.rule,
+      targets: [...plan.targets],
+      members,
+      thread,
+      mates: teammates.map((mate) => ({
+        id: mate.id,
+        displayName: mate.displayName,
+        tags: [...mate.tags],
+      })),
+    });
+    if (input?.waitForPeers === true) {
+      await job;
+      return { ok: true, state: await this.view() };
+    }
+    // Client RPC default timeout is 30s. Three sequential model wakes blow
+    // past it; the late setState still paints replies and the banner stays.
+    this.ctx.waitUntil(job);
     return { ok: true, state: next };
+  }
+
+  /**
+   * Broadcast and @-mentions both land here. Targets wake in parallel;
+   * allSettled isolates a failed peer from the others.
+   */
+  private finishHandoff(job: HandoffJob): Promise<void> {
+    const run = (async () => {
+      const settled = await settleFanout(job.targets, async (id) => {
+        const peer = await getAgentByName(this.env.PeerAgent, id);
+        const mate = job.mates.find((item) => item.id === id);
+        const wake = await peer.wake({
+          kind: "room",
+          text: job.text,
+          room: this.name,
+          from: job.authorId,
+          displayName: mate?.displayName ?? id,
+          tags: mate ? [...mate.tags] : [],
+          members: job.members,
+          thread: job.thread,
+        });
+        return { reply: wake.reply, wokeAt: wake.wokeAt };
+      });
+      const { lines, receipts } = linesFromFanout(job.humanId, settled);
+      if (lines.length > 0) this.insertAfter(job.anchorId, lines);
+      if (receipts.length > 0) {
+        try {
+          const registry = await getAgentByName(this.env.TeammateRegistry, REGISTRY_NAME);
+          await registry.recordWakes(receipts);
+        } catch (error) {
+          this.appendMessages([
+            systemMessage(`登记叫醒次数失败：${errorText(error)}`, `registry:${job.humanId}`),
+          ]);
+        }
+      }
+      console.log(
+        JSON.stringify({
+          event: "room.handoff",
+          room: this.name,
+          rule: job.rule,
+          targets: job.targets,
+          failed: settled.filter((item) => !item.ok).map((item) => item.id),
+        }),
+      );
+    })();
+    return run.catch((error) => {
+      this.appendMessages([
+        systemMessage(`交接中断：${errorText(error)}`, `handoff:${job.humanId}:crash`),
+      ]);
+    });
+  }
+
+  private appendMessages(extra: RoomMessage[]): RoomState {
+    return this.insertAfter(null, extra);
+  }
+
+  private insertAfter(anchorId: string | null, extra: RoomMessage[]): RoomState {
+    const seen = new Set(this.state.messages.map((message) => message.id));
+    const fresh = extra.filter((message) => !seen.has(message.id));
+    const messages = [...this.state.messages];
+    const index = anchorId === null ? -1 : messages.findIndex((message) => message.id === anchorId);
+    const at = index < 0 ? messages.length : index + 1;
+    messages.splice(at, 0, ...fresh);
+    return this.commit(messages, this.state.memberIds, this.state.opened);
   }
 
   async view(): Promise<RoomState> {
@@ -202,9 +261,9 @@ export class RoomAgent extends Agent<Env, RoomState> {
   }
 }
 
-function systemMessage(text: string): RoomMessage {
+function systemMessage(text: string, id?: string): RoomMessage {
   return {
-    id: crypto.randomUUID(),
+    id: id ?? crypto.randomUUID(),
     authorId: "room",
     text,
     createdAt: new Date().toISOString(),
@@ -212,6 +271,22 @@ function systemMessage(text: string): RoomMessage {
     handoff: null,
   };
 }
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+type HandoffJob = {
+  humanId: string;
+  anchorId: string;
+  text: string;
+  authorId: string;
+  rule: HandoffRule;
+  targets: string[];
+  members: WakeMember[];
+  thread: WakeTurn[];
+  mates: Array<{ id: string; displayName: string; tags: string[] }>;
+};
 
 function orderMembers(memberIds: string[], directoryOrder: string[]): string[] {
   const rank = new Map(directoryOrder.map((id, index) => [id, index]));
