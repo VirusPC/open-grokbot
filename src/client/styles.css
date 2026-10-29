@@ -513,14 +513,29 @@ h3 {
   font-size: 0.75rem;
 }
 
-.composer.sticky {
-  position: sticky;
-  bottom: 0;
-  background: var(--bg);
-  padding-top: 8px;
+.peers-pane .pane-scroll {
+  overflow-anchor: none;
 }
 
-.room-block { margin-top: 8px; }
+.room-block {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* In the room, the composer sits under the thread. A sticky bottom inside
+   the scrolling pane left a tall blank under the messages after Enter. */
+.room-block .composer {
+  position: static;
+  padding: 0;
+}
+
+.room-block textarea {
+  resize: none;
+  max-height: 7.5rem;
+  overflow: auto;
+}
 
 .stat-card {
   padding: 14px;

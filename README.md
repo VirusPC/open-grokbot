@@ -54,7 +54,7 @@ curl -s -X POST http://127.0.0.1:43123/webhooks/ping \
 
 `name` 要和页面上的实例名一致，默认 `lab`。响应里能看到 webhook 计数。`"turn": false` 时只写状态，不提交模型回合。
 
-4. **同事**（不需要模型）：切到「同事」。名单里有 Desk、Researcher、NoteTaker。点「创建房间」，再点「大家好，我是来看并列交接的」。三条回复都回来，并且标着广播。再点「`@notetaker` …」，这次只多一条 NoteTaker。这是按 id 叫醒，不是对话页里的 `agentTool`。步骤和 curl 在 [docs/PEERS.md](docs/PEERS.md)。
+4. **同事**：切到「同事」。名单里有 Desk、Researcher、NoteTaker。点「创建房间」，再点「你们叫什么名字」。三条回复各自报出名字，并且标着广播，正文不是架构说明。再点「`@notetaker` …」，这次只多一条 NoteTaker。这是按 id 叫醒，不是对话页里的 `agentTool`。有模型时回答走 Workers AI（或 `OPENAI_API_KEY`）；没有模型时仍按显示名短答。步骤和 curl 在 [docs/PEERS.md](docs/PEERS.md)。
 
 健康检查：`GET /api/health`。
 
@@ -131,7 +131,7 @@ src/agents/desk.ts      主 Think
 src/agents/researcher.ts
 src/agents/registry.ts  并列同事登记表
 src/agents/room.ts      房间频道
-src/agents/peer.ts      按 id 叫醒的规则回复
+src/agents/peer.ts      按 id 叫醒，按线程回答
 src/peers/http.ts       /api/teammates、/api/rooms、/api/peers
 src/tools/              get_time、记忆、agentTool、MCP 钩子
 src/memory/ledger.ts    记忆账本

@@ -106,7 +106,16 @@ export class TeammateRegistry extends Agent<Env, RegistryState> {
     if (!mate) return { ok: false, error: `登记表里没有「${id}」。` };
 
     const peer = await getAgentByName(this.env.PeerAgent, id);
-    const wake = await peer.wake({ kind: "dm", text, room: null, from: "you" });
+    const wake = await peer.wake({
+      kind: "dm",
+      text,
+      room: null,
+      from: "you",
+      displayName: mate.displayName,
+      tags: [...mate.tags],
+      members: [],
+      thread: [],
+    });
     const teammate = this.applyWakes([{ id, at: wake.wokeAt, kind: "dm" }]).find(
       (item) => item.id === id,
     );

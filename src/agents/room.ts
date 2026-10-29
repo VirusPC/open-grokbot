@@ -1,4 +1,5 @@
 import { Agent, callable, getAgentByName } from "agents";
+import { selectWakeThread } from "./peer-reply";
 import {
   MAX_ROOM_MESSAGES,
   REGISTRY_NAME,
@@ -12,6 +13,7 @@ import {
   type PostResult,
   type RoomMessage,
   type RoomState,
+  type WakeMember,
   type WakeReceipt,
 } from "./peer-types";
 
@@ -21,11 +23,12 @@ import {
  * postMessage does not run inside a Desk Think turn:
  *   1. planHandoff decides broadcast vs @-only
  *   2. getAgentByName(env.PeerAgent, id) wakes each target
- *   3. the peer returns a line; this room appends it
+ *   3. the peer returns a line that answers `text`; this room appends it
  *
  * The peer does not fetch this room back. A Durable Object waiting on its
- * own stub deadlocks the input gate. Peer replies are `kind: "peer"` and
- * are not fanned out again.
+ * own stub deadlocks the input gate. The room passes a snapshot of earlier
+ * human and peer lines instead. Peer replies are `kind: "peer"` and are
+ * not fanned out again.
  */
 export class RoomAgent extends Agent<Env, RoomState> {
   initialState: RoomState = {
@@ -93,6 +96,12 @@ export class RoomAgent extends Agent<Env, RoomState> {
 
     const registry = await getAgentByName(this.env.TeammateRegistry, REGISTRY_NAME);
     const teammates = await registry.list();
+    const names = new Map(teammates.map((mate) => [mate.id, mate.displayName]));
+    const members: WakeMember[] = this.state.memberIds.map((id) => ({
+      id,
+      displayName: names.get(id) ?? id,
+    }));
+    const thread = selectWakeThread(this.state.messages, names);
     const plan = planHandoff(text, this.state.memberIds, teammates);
     const messages: RoomMessage[] = [
       ...this.state.messages,
@@ -117,11 +126,16 @@ export class RoomAgent extends Agent<Env, RoomState> {
     for (const id of plan.targets) {
       try {
         const peer = await getAgentByName(this.env.PeerAgent, id);
+        const mate = teammates.find((item) => item.id === id);
         const wake = await peer.wake({
           kind: "room",
           text,
           room: this.name,
           from: authorId,
+          displayName: mate?.displayName ?? names.get(id) ?? id,
+          tags: mate ? [...mate.tags] : [],
+          members,
+          thread,
         });
         receipts.push({ id, at: wake.wokeAt, kind: "room" });
         messages.push({

@@ -1,18 +1,25 @@
+import { generateText } from "ai";
 import { Agent } from "agents";
 import {
-  initialPeerState,
-  type PeerState,
-  type WakeRequest,
-  type WakeResult,
-} from "./peer-types";
+  answerWake,
+  buildPeerPrompt,
+  peerReplyInput,
+  type PeerReplyInput,
+} from "./peer-reply";
+import { initialPeerState, type PeerState, type WakeRequest, type WakeResult } from "./peer-types";
+import { resolveModel } from "./model";
 
 /**
- * Addressable peer stub. Instance name is the registry id (`desk`,
+ * Addressable peer. Instance name is the registry id (`desk`,
  * `researcher`, `notetaker`, or someone registered later).
  *
- * The room (or a DM) wakes this object with getAgentByName. The reply is
- * rule-based so the lab works with no model and no Workers AI login.
- * This is not a Think turn and not an agentTool child.
+ * The room (or a DM) wakes this object with getAgentByName and passes a
+ * snapshot of the thread. The reply answers that latest line. This is not
+ * a Think turn and not an agentTool child.
+ *
+ * The model is the same resolver Desk uses (Workers AI, or OpenAI when
+ * OPENAI_API_KEY is set). If that call fails or comes back as the old
+ * architecture dump, a short rule answers from the display name instead.
  *
  * 常驻 is the named Durable Object: wake() writes state, then the isolate
  * may sleep. The name still routes the next wake.
@@ -27,46 +34,65 @@ export class PeerAgent extends Agent<Env, PeerState> {
 
   async wake(input: WakeRequest): Promise<WakeResult> {
     const wokeAt = new Date().toISOString();
-    const reply = composeReply(this.name, input);
+    const replyInput = peerReplyInput(this.name, input);
+    const answered = await answerWake(replyInput, (next) => completeWithModel(this.env, next));
     const wakeCount = this.state.wakeCount + 1;
     this.setState({
       peerId: this.name,
       wakeCount,
       lastWakeAt: wokeAt,
-      lastKind: input.kind,
-      lastRoom: input.room,
-      lastInbound: input.text.slice(0, 500),
-      lastReply: reply,
+      lastKind: replyInput.kind,
+      lastRoom: input.room ?? null,
+      lastInbound: replyInput.text.slice(0, 500),
+      lastReply: answered.reply,
+      lastReplySource: answered.source,
     });
-    return { peerId: this.name, reply, wokeAt, wakeCount };
+    console.log(
+      JSON.stringify({
+        event: "peer.reply",
+        peerId: this.name,
+        source: answered.source,
+        kind: replyInput.kind,
+        ...(answered.reason ? { fallback: answered.reason } : {}),
+      }),
+    );
+    return { peerId: this.name, reply: answered.reply, wokeAt, wakeCount };
   }
 
   /** HTTP `GET /api/peers/:id` reads the last wake this instance stored. */
   async view(): Promise<PeerState> {
-    return { ...this.state, peerId: this.state.peerId || this.name };
+    return {
+      ...this.state,
+      peerId: this.state.peerId || this.name,
+      lastReplySource: this.state.lastReplySource ?? null,
+    };
   }
 }
 
-function composeReply(id: string, input: WakeRequest): string {
-  const clip = clipText(input.text);
-  const via =
-    input.kind === "dm"
-      ? "私信按 id 直接送到这个 PeerAgent，没有进房间，也没有 agentTool。"
-      : "房间按 id 叫醒了这个 PeerAgent，回复交回房间，不嵌在 Desk 的 Think 回合里。";
-
-  if (id === "desk") {
-    return `并列 Desk 收到：「${clip}」。${via}对话页里的 DeskAgent 是另一条绑定。`;
+async function completeWithModel(env: Env, input: PeerReplyInput): Promise<string> {
+  const { system, prompt } = buildPeerPrompt(input);
+  try {
+    const result = await generateText({
+      model: resolveModel(env),
+      system,
+      prompt,
+      maxOutputTokens: 500,
+      maxRetries: 0,
+      timeout: 12_000,
+    });
+    const text = result.text.trim();
+    if (text) return text;
+    return result.reasoningText?.trim() ?? "";
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.log(
+      JSON.stringify({
+        event: "peer.model_error",
+        peerId: input.id,
+        name: error instanceof Error ? error.name : "Error",
+        detail: detail.replace(/\s+/g, " ").slice(0, 140),
+      }),
+    );
+    throw error;
   }
-  if (id === "researcher") {
-    return `并列 Researcher 收到：「${clip}」。${via}我不是对话页里那个 agentTool 子回合。`;
-  }
-  if (id === "notetaker") {
-    return `NoteTaker 记下：「${clip}」。${via}`;
-  }
-  return `${id} 收到：「${clip}」。${via}这是规则回复，不调用模型。`;
-}
-
-function clipText(text: string): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > 80 ? `${flat.slice(0, 80)}…` : flat;
 }

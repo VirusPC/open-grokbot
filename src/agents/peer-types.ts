@@ -6,7 +6,8 @@
  *   The child Think runs nested inside the parent's turn.
  * - Peers: TeammateRegistry discovers rows, RoomAgent is the channel, and
  *   PeerAgent instances are addressed by id. Desk is one row, not the parent
- *   of the others. This cut does not give each peer its own persona memory.
+ *   of the others. A wake carries the room thread for that reply only.
+ *   This cut does not give each peer its own persona memory.
  */
 
 import { normalizeSessionName } from "./state";
@@ -68,6 +69,21 @@ export type PeerState = {
   lastRoom: string | null;
   lastInbound: string | null;
   lastReply: string | null;
+  /** Where the last reply came from. Missing on instances woken before this field existed. */
+  lastReplySource: "model" | "rule" | null;
+};
+
+/** Someone in the room, passed into a wake so the peer does not call the room back. */
+export type WakeMember = {
+  id: string;
+  displayName: string;
+};
+
+/** One earlier human or peer line. System notices are not included. */
+export type WakeTurn = {
+  authorId: string;
+  authorName: string;
+  text: string;
 };
 
 export type WakeRequest = {
@@ -75,6 +91,12 @@ export type WakeRequest = {
   text: string;
   room: string | null;
   from: string;
+  displayName: string;
+  tags: string[];
+  /** Room roster including this peer. Empty for a DM. */
+  members: WakeMember[];
+  /** Earlier conversation, oldest first. Does not include `text`. */
+  thread: WakeTurn[];
 };
 
 export type WakeResult = {
@@ -156,6 +178,7 @@ export const initialPeerState: PeerState = {
   lastRoom: null,
   lastInbound: null,
   lastReply: null,
+  lastReplySource: null,
 };
 
 export function cloneTeammate(mate: Teammate): Teammate {

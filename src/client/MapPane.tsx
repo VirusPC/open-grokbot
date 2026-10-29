@@ -13,7 +13,7 @@ const LAYERS = [
   },
   {
     concept: "并列同事",
-    where: "登记表发现同事，房间按 id 叫醒 PeerAgent。不经过 agentTool，也不是完整的分身记忆。",
+    where: "登记表发现同事，房间按 id 叫醒 PeerAgent，对方按线程短答。不经过 agentTool。",
     file: "src/agents/registry.ts · room.ts · peer.ts",
   },
   {
