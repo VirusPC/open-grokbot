@@ -106,7 +106,7 @@ export function PeersPane() {
   }
 
   return (
-    <section className="pane" aria-label="同事">
+    <section className="pane peers-pane" aria-label="同事">
       <div className="pane-scroll">
         <p className="eyebrow">Peers</p>
         <h2>并列，不是父子。</h2>
@@ -326,7 +326,9 @@ function RoomSession({
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const endRef = useRef<HTMLLIElement>(null);
+  const roomRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLOListElement>(null);
+  const composerRef = useRef<HTMLFormElement>(null);
   const memberKey = memberIds.join(",");
 
   const room = useAgent<RoomAgent, RoomState>({
@@ -360,15 +362,15 @@ function RoomSession({
   const state = room.state ?? initialRoomState;
   const names = new Map(teammates.map((mate) => [mate.id, mate.displayName]));
   const mentionIds = state.opened && state.memberIds.length > 0 ? state.memberIds : memberIds;
-  const roomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    roomRef.current?.scrollIntoView({ block: "nearest" });
-  }, [name]);
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "nearest" });
-  }, [state.messages.length]);
+    const scroller = roomRef.current?.closest(".pane-scroll");
+    if (!(scroller instanceof HTMLElement)) return;
+    const tail = composerRef.current ?? roomRef.current;
+    if (!tail) return;
+    const last = transcriptRef.current?.lastElementChild;
+    revealRoomEnd(scroller, last instanceof HTMLElement ? last : null, tail);
+  }, [name, state.messages.length]);
 
   async function send(text: string) {
     const clean = text.trim();
@@ -398,7 +400,7 @@ function RoomSession({
       {state.messages.length === 0 ? (
         <p className="empty-inline">房间线程还是空的。创建成功后，这里会出现一条说明。</p>
       ) : (
-        <ol className="transcript" aria-live="polite">
+        <ol className="transcript" aria-live="polite" ref={transcriptRef}>
           {state.messages.map((message) => (
             <li key={message.id} className={`bubble bubble-${bubbleClass(message)}`}>
               <span className="who">{whoLabel(message, names)}</span>
@@ -409,7 +411,6 @@ function RoomSession({
               ) : null}
             </li>
           ))}
-          <li ref={endRef} className="sr-only" />
         </ol>
       )}
       {error ? (
@@ -436,7 +437,8 @@ function RoomSession({
         ))}
       </div>
       <form
-        className="composer sticky"
+        ref={composerRef}
+        className="composer"
         onSubmit={(event) => {
           event.preventDefault();
           void send(draft);
@@ -448,6 +450,12 @@ function RoomSession({
           placeholder={state.opened ? "写给房间。@id 只叫醒那一位。" : "等房间打开"}
           disabled={!ready || !state.opened}
           onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              void send(draft);
+            }
+          }}
         />
         <div className="composer-actions">
           <span className="peer-meta">{pending ? "正在交接" : "不经过 Think"}</span>
@@ -471,6 +479,28 @@ function RoomSession({
       </form>
     </div>
   );
+}
+
+/**
+ * Move the peers scroller just far enough to show the newest line and the
+ * composer. scrollIntoView walks every ancestor and, with a sticky composer,
+ * lands in the empty region under the thread.
+ */
+function revealRoomEnd(scroller: HTMLElement, message: HTMLElement | null, tail: HTMLElement) {
+  const view = scroller.getBoundingClientRect();
+  const tailBox = tail.getBoundingClientRect();
+  let delta = tailBox.bottom - view.bottom + 8;
+  if (message && delta > 0) {
+    const messageBox = message.getBoundingClientRect();
+    // Keep the newest bubble on screen when the composer is taller than the pane.
+    // Clipping the top of that bubble is fine; hiding the composer is not.
+    if (messageBox.bottom - delta < view.top + 24) {
+      delta = messageBox.bottom - view.bottom + 8;
+    }
+  }
+  if (delta <= 1) return;
+  const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  scroller.scrollTop = Math.min(maxTop, scroller.scrollTop + delta);
 }
 
 function bubbleClass(message: RoomMessage): string {
