@@ -1,4 +1,11 @@
 import { Agent, callable, getAgentByName } from "agents";
+import { clipTraceText, readLangfuseCredentials, traceTags } from "../observe/config";
+import {
+  flushLangfuse,
+  openObservation,
+  type Observation,
+  type ObservationSpec,
+} from "../observe/langfuse";
 import { linesFromFanout, settleFanout } from "./fanout";
 import { selectWakeThread } from "./peer-reply";
 import {
@@ -17,6 +24,7 @@ import {
   type RoomState,
   type WakeMember,
   type WakeReceipt,
+  type WakeTrace,
   type WakeTurn,
 } from "./peer-types";
 import { effectiveLeader, planLeaderFanout, planRoomRoute, routingHint } from "./routing";
@@ -166,7 +174,25 @@ export class RoomAgent extends Agent<Env, RoomState> {
 
     const anchorId = batch[batch.length - 1]?.id ?? humanId;
     const next = this.appendMessages(batch);
-    if (plan.targets.length === 0) return { ok: true, state: next };
+    if (plan.targets.length === 0) {
+      if (readLangfuseCredentials(this.env)) {
+        this.ctx.waitUntil(
+          this.traceDecision({
+            mode: routing,
+            rule: plan.rule,
+            targets: [],
+            text,
+            output: {
+              woken: [],
+              failed: [],
+              unknown: plan.unknown,
+              outsideRoom: plan.outsideRoom,
+            },
+          }),
+        );
+      }
+      return { ok: true, state: next };
+    }
 
     const job = this.finishHandoff({
       humanId,
@@ -200,52 +226,133 @@ export class RoomAgent extends Agent<Env, RoomState> {
    * allSettled isolates a failed peer from the others.
    */
   private finishHandoff(job: HandoffJob): Promise<void> {
+    const mode = this.routingMode();
     const run = (async () => {
-      const settled = await settleFanout(job.targets, async (id) => {
-        const peer = await getAgentByName(this.env.PeerAgent, id);
-        const mate = job.mates.find((item) => item.id === id);
-        const wake = await peer.wake({
-          kind: "room",
-          text: job.text,
-          room: this.name,
-          from: job.authorId,
-          displayName: mate?.displayName ?? id,
-          tags: mate ? [...mate.tags] : [],
-          members: job.members,
-          thread: job.thread,
-          delegate: job.rule === "leader" && id === job.leaderId,
+      const trace = await openObservation(this.env, this.handoffSpec(mode, job.rule, job.targets, job.text));
+      try {
+        const settled = await settleFanout(job.targets, async (id) => {
+          const peer = await getAgentByName(this.env.PeerAgent, id);
+          const mate = job.mates.find((item) => item.id === id);
+          const wake = await peer.wake({
+            kind: "room",
+            text: job.text,
+            room: this.name,
+            from: job.authorId,
+            displayName: mate?.displayName ?? id,
+            tags: mate ? [...mate.tags] : [],
+            members: job.members,
+            thread: job.thread,
+            delegate: job.rule === "leader" && id === job.leaderId,
+            trace: parentTrace(trace, mode, job.rule),
+          });
+          return { reply: wake.reply, wokeAt: wake.wokeAt };
         });
-        return { reply: wake.reply, wokeAt: wake.wokeAt };
-      });
-      const { lines, receipts } = linesFromFanout(job.humanId, settled);
-      if (lines.length > 0) this.insertAfter(job.anchorId, lines);
-      const moreReceipts = await this.fanOutLeaderReply(job, lines);
-      await this.recordReceipts(job.humanId, [...receipts, ...moreReceipts]);
+        const { lines, receipts } = linesFromFanout(job.humanId, settled);
+        if (lines.length > 0) this.insertAfter(job.anchorId, lines);
+        const second = await this.fanOutLeaderReply(job, lines, trace);
+        const failed = [
+          ...settled.filter((item) => !item.ok).map((item) => item.id),
+          ...second.failed,
+        ];
+        const woken = [
+          ...settled.filter((item) => item.ok).map((item) => item.id),
+          ...second.woken,
+        ];
+        await this.recordReceipts(job.humanId, [...receipts, ...second.receipts]);
+        trace.annotate({
+          output: { woken, failed, fanoutTargets: second.targets },
+          level: failed.length > 0 ? "WARNING" : "DEFAULT",
+          statusMessage: failed.length > 0 ? `叫醒失败：${failed.join("、")}` : undefined,
+        });
+        console.log(
+          JSON.stringify({
+            event: "room.handoff",
+            room: this.name,
+            rule: job.rule,
+            targets: job.targets,
+            failed,
+          }),
+        );
+      } catch (error) {
+        trace.fail(error);
+        this.appendMessages([
+          systemMessage(`交接中断：${errorText(error)}`, `handoff:${job.humanId}:crash`),
+        ]);
+      } finally {
+        trace.end();
+        await flushLangfuse();
+      }
+    })();
+    return run;
+  }
+
+  /** No peers to wake. Still record the routing decision, off the RPC timeout path. */
+  private async traceDecision(input: {
+    mode: RoomRouting;
+    rule: HandoffRule;
+    targets: string[];
+    text: string;
+    output: Record<string, unknown>;
+  }): Promise<void> {
+    try {
+      const trace = await openObservation(
+        this.env,
+        this.handoffSpec(input.mode, input.rule, input.targets, input.text),
+      );
+      try {
+        trace.annotate({ output: input.output });
+      } finally {
+        trace.end();
+        await flushLangfuse();
+      }
+    } catch (error) {
       console.log(
         JSON.stringify({
-          event: "room.handoff",
-          room: this.name,
-          rule: job.rule,
-          targets: job.targets,
-          failed: settled.filter((item) => !item.ok).map((item) => item.id),
+          event: "langfuse.decision_error",
+          detail: errorText(error).replace(/\s+/g, " ").slice(0, 140),
         }),
       );
-    })();
-    return run.catch((error) => {
-      this.appendMessages([
-        systemMessage(`交接中断：${errorText(error)}`, `handoff:${job.humanId}:crash`),
-      ]);
-    });
+    }
+  }
+
+  private handoffSpec(
+    mode: RoomRouting,
+    rule: HandoffRule,
+    targets: readonly string[],
+    text: string,
+  ): ObservationSpec {
+    return {
+      name: "room.handoff",
+      asType: "agent",
+      traceName: "room.handoff",
+      sessionId: this.name,
+      tags: traceTags({ mode, rule, room: this.name }),
+      metadata: {
+        "routing.mode": mode,
+        "handoff.rule": rule,
+        room: this.name,
+        targets: targets.join(","),
+      },
+      input: {
+        room: this.name,
+        mode,
+        rule,
+        targets: [...targets],
+        text: clipTraceText(text),
+      },
+    };
   }
 
   /** Squad only: @ inside the leader reply wakes those peers. They do not call back. */
   private async fanOutLeaderReply(
     job: HandoffJob,
     lines: RoomMessage[],
-  ): Promise<WakeReceipt[]> {
-    if (job.rule !== "leader") return [];
+    parent: Observation,
+  ): Promise<{ receipts: WakeReceipt[]; targets: string[]; failed: string[]; woken: string[] }> {
+    const empty = { receipts: [], targets: [], failed: [], woken: [] };
+    if (job.rule !== "leader") return empty;
     const leaderLine = lines.find((line) => line.kind === "peer" && line.authorId === job.leaderId);
-    if (!leaderLine) return [];
+    if (!leaderLine) return empty;
     const fan = planLeaderFanout(leaderLine.text, job.memberIds, job.mates, job.leaderId);
     const notes: RoomMessage[] = [];
     for (const token of fan.unknown) {
@@ -256,35 +363,67 @@ export class RoomAgent extends Agent<Env, RoomState> {
     }
     if (fan.targets.length === 0) {
       if (notes.length > 0) this.appendMessages(notes);
-      return [];
+      return empty;
     }
-    this.addHandoffTargets(job.humanId, fan.targets);
-    notes.unshift(systemMessage(`Squad：队长回复里点了 ${fan.targets.join("、")}，再叫醒。同伴不回头调用房间。`));
-    const noteAnchor = notes[notes.length - 1]?.id ?? leaderLine.id;
-    this.insertAfter(leaderLine.id, notes);
-    const names = new Map(job.mates.map((mate) => [mate.id, mate.displayName]));
-    const thread = selectWakeThread(
-      this.state.messages.filter((message) => message.id !== leaderLine.id),
-      names,
-    );
-    const settled = await settleFanout(fan.targets, async (id) => {
-      const peer = await getAgentByName(this.env.PeerAgent, id);
-      const mate = job.mates.find((item) => item.id === id);
-      const wake = await peer.wake({
-        kind: "room",
-        text: leaderLine.text,
+    const fanSpan = parent.child({
+      name: "squad.fanout",
+      asType: "span",
+      sessionId: this.name,
+      tags: traceTags({ mode: "squad", rule: "leader", room: this.name }),
+      metadata: {
+        "routing.mode": "squad",
+        "handoff.rule": "leader",
         room: this.name,
-        from: job.leaderId,
-        displayName: mate?.displayName ?? id,
-        tags: mate ? [...mate.tags] : [],
-        members: job.members,
-        thread,
-      });
-      return { reply: wake.reply, wokeAt: wake.wokeAt };
+        targets: fan.targets.join(","),
+        leaderId: job.leaderId,
+      },
+      input: {
+        targets: [...fan.targets],
+        leaderText: clipTraceText(leaderLine.text),
+      },
     });
-    const second = linesFromFanout(job.humanId, settled);
-    if (second.lines.length > 0) this.insertAfter(noteAnchor, second.lines);
-    return second.receipts;
+    try {
+      this.addHandoffTargets(job.humanId, fan.targets);
+      notes.unshift(systemMessage(`Squad：队长回复里点了 ${fan.targets.join("、")}，再叫醒。同伴不回头调用房间。`));
+      const noteAnchor = notes[notes.length - 1]?.id ?? leaderLine.id;
+      this.insertAfter(leaderLine.id, notes);
+      const names = new Map(job.mates.map((mate) => [mate.id, mate.displayName]));
+      const thread = selectWakeThread(
+        this.state.messages.filter((message) => message.id !== leaderLine.id),
+        names,
+      );
+      const settled = await settleFanout(fan.targets, async (id) => {
+        const peer = await getAgentByName(this.env.PeerAgent, id);
+        const mate = job.mates.find((item) => item.id === id);
+        const wake = await peer.wake({
+          kind: "room",
+          text: leaderLine.text,
+          room: this.name,
+          from: job.leaderId,
+          displayName: mate?.displayName ?? id,
+          tags: mate ? [...mate.tags] : [],
+          members: job.members,
+          thread,
+          trace: parentTrace(fanSpan, "squad", "leader"),
+        });
+        return { reply: wake.reply, wokeAt: wake.wokeAt };
+      });
+      const second = linesFromFanout(job.humanId, settled);
+      if (second.lines.length > 0) this.insertAfter(noteAnchor, second.lines);
+      const failed = settled.filter((item) => !item.ok).map((item) => item.id);
+      const woken = settled.filter((item) => item.ok).map((item) => item.id);
+      fanSpan.annotate({
+        output: { woken, failed },
+        level: failed.length > 0 ? "WARNING" : "DEFAULT",
+        statusMessage: failed.length > 0 ? `队长转交失败：${failed.join("、")}` : undefined,
+      });
+      return { receipts: second.receipts, targets: [...fan.targets], failed, woken };
+    } catch (error) {
+      fanSpan.fail(error);
+      throw error;
+    } finally {
+      fanSpan.end();
+    }
   }
 
   private addHandoffTargets(humanId: string, extra: string[]): void {
@@ -407,6 +546,15 @@ function systemMessage(text: string, id?: string): RoomMessage {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function parentTrace(
+  obs: Observation,
+  mode: RoomRouting,
+  rule: HandoffRule,
+): WakeTrace | undefined {
+  if (!obs.link) return undefined;
+  return { traceId: obs.link.traceId, spanId: obs.link.spanId, mode, rule };
 }
 
 type HandoffJob = {

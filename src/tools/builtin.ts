@@ -7,11 +7,20 @@ import {
   type MemoryWriteResult,
 } from "../memory/ledger";
 import type { MemoryEntry } from "../agents/state";
+import { clipTraceText, traceTags } from "../observe/config";
+import { openObservation, scheduleLangfuseFlush } from "../observe/langfuse";
 import { createTimeTool } from "./time";
 
 type MemoryHost = {
   remember(input: { key: string; value: string }): Promise<MemoryWriteResult>;
   recall(key?: string): Promise<MemoryEntry[]>;
+};
+
+type TraceRuntime = {
+  env: Env;
+  ctx: { waitUntil(promise: Promise<unknown>): void };
+  /** Desk Durable Object name. Groups research traces in one Langfuse session. */
+  name: string;
 };
 
 /**
@@ -22,7 +31,7 @@ type MemoryHost = {
  * Peer mode does not add a tool here. TeammateRegistry, RoomAgent, and
  * PeerAgent are addressed by id from the room, outside this turn.
  */
-export function createDeskTools(host: MemoryHost): ToolSet {
+export function createDeskTools(host: MemoryHost, runtime: TraceRuntime): ToolSet {
   return {
     get_time: createTimeTool(),
     memory_write: tool({
@@ -61,13 +70,61 @@ export function createDeskTools(host: MemoryHost): ToolSet {
         }
       },
     }),
-    research: agentTool(ResearcherAgent, {
-      description:
-        "把一个概念交给 ResearcherAgent。那是另一个 Think Durable Object，适合解释本实验仓里的架构概念。不要用它查实时网页。",
-      displayName: "Researcher",
-      inputSchema: z.object({
-        query: z.string().min(2).describe("需要研究的问题"),
-      }),
-    }),
+    research: tracedResearch(runtime),
   };
+}
+
+/**
+ * One agent span around agentTool(ResearcherAgent). The child Think still
+ * runs inside Desk's turn; this only records the dispatch. No keys: the
+ * original execute runs unchanged.
+ */
+function tracedResearch(runtime: TraceRuntime): ToolSet["research"] {
+  const research = agentTool(ResearcherAgent, {
+    description:
+      "把一个概念交给 ResearcherAgent。那是另一个 Think Durable Object，适合解释本实验仓里的架构概念。不要用它查实时网页。",
+    displayName: "Researcher",
+    inputSchema: z.object({
+      query: z.string().min(2).describe("需要研究的问题"),
+    }),
+  });
+  const execute = research.execute?.bind(research);
+  if (!execute) return research;
+  research.execute = async (input, options) => {
+    const span = await openObservation(runtime.env, {
+      name: "desk.research",
+      asType: "agent",
+      traceName: "desk.research",
+      sessionId: `desk:${runtime.name || "lab"}`,
+      tags: traceTags({}),
+      metadata: { tool: "research", feature: "agentTool" },
+      input: { query: clipTraceText(input.query) },
+    });
+    try {
+      const result = await execute(input, options);
+      const failure = researchFailure(result);
+      span.annotate({
+        output: typeof result === "string" ? clipTraceText(result) : failure ?? { ok: true },
+        level: failure ? "ERROR" : "DEFAULT",
+        statusMessage: failure?.error,
+      });
+      return result;
+    } catch (error) {
+      span.fail(error);
+      throw error;
+    } finally {
+      span.end();
+      scheduleLangfuseFlush(runtime.ctx);
+    }
+  };
+  return research;
+}
+
+function researchFailure(result: unknown): { ok: false; error: string } | null {
+  if (!result || typeof result !== "object" || !("ok" in result)) return null;
+  if ((result as { ok?: unknown }).ok !== false) return null;
+  const error = "error" in result && typeof (result as { error?: unknown }).error === "string"
+    ? (result as { error: string }).error
+    : "agentTool failed";
+  return { ok: false, error: clipTraceText(error, 300) };
 }

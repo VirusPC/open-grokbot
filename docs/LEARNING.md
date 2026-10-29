@@ -52,6 +52,7 @@ Think 在构造时会包一层 `onStart`：先建好 session 和 context，再�
 3. `src/agents/room.ts` 的 `postMessage` 和 `src/agents/fanout.ts`：广播和 `@` 都用 `Promise.allSettled` 并行 `getAgentByName(PeerAgent, id)`。同伴把回复交回来，房间自己追加。同伴不回头 `fetch` 这个房间，否则同一个 Durable Object 会把自己等死。页面先返回你的那一句，回复靠 `setState` 推上来。
 4. `src/agents/peer.ts` 和 `peer-reply.ts`：叫醒时带上房间线程，用和 Desk 相同的模型短答。模型不可用时按显示名回答，不把架构说明当成正文。`wakeCount` 写在实例自己的状态里。常驻是这个名字还能被叫醒，不是 CPU 一直开着。
 5. `src/client/PeersPane.tsx`：同事列表、创建房间、`@`。
+6. `src/observe/langfuse.ts`：可选。三个 Langfuse 密钥都在，房间交接和叫醒才写成 trace。缺一个就什么都不发。见 [OBSERVABILITY.md](./OBSERVABILITY.md)。
 
 `src/agents/state.ts` 仍然只服务 Desk。并列状态在 `peer-types.ts`，因为 Worker 和 H5 都要读。
 

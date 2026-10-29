@@ -8,7 +8,7 @@
     "dev": "vite dev --host 0.0.0.0 --port 43123 --strictPort",
     "build": "vite build",
     "check": "tsc --noEmit",
-    "test": "tsx --test src/agents/*.test.ts src/client/*.test.ts",
+    "test": "tsx --test src/agents/*.test.ts src/client/*.test.ts src/observe/*.test.ts",
     "types": "wrangler types"
   },
   "license": "MIT",
@@ -19,6 +19,9 @@
     "@cloudflare/ai-chat": "^0.12.2",
     "@cloudflare/computer": "^0.8.0",
     "@cloudflare/think": "^0.22.0",
+    "@langfuse/otel": "^6.0.2",
+    "@langfuse/tracing": "^6.0.2",
+    "@opentelemetry/sdk-trace-base": "^2.12.0",
     "agents": "^0.31.0",
     "ai": "^7.0.155",
     "just-bash": "^3.6.0",
