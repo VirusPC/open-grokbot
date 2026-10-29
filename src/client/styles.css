@@ -431,6 +431,97 @@ h3 {
 
 .entry-list time { color: var(--amber); font-size: 0.75rem; }
 
+.entry-list li.picked { border-color: var(--lime); }
+
+.peer-meta {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.tag-row,
+.chip-row,
+.check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--teal);
+  font-size: 0.72rem;
+}
+
+.check-row {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.check-row legend {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-bottom: 6px;
+}
+
+.stack-form label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  color: var(--ink);
+}
+
+.check input {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--lime);
+}
+
+.stack-form .banner {
+  margin: 0;
+}
+
+.fold {
+  margin-top: 12px;
+}
+
+.fold summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.fold .stack-form,
+.dm-form {
+  margin-top: 10px;
+}
+
+.bubble-peer { margin-right: 8%; }
+
+.bubble-system {
+  background: transparent;
+  border-style: dashed;
+}
+
+.handoff {
+  display: block;
+  margin-top: 6px;
+  color: var(--amber);
+  font-size: 0.75rem;
+}
+
+.composer.sticky {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+  padding-top: 8px;
+}
+
+.room-block { margin-top: 8px; }
+
 .stat-card {
   padding: 14px;
   margin-top: 12px;
@@ -473,7 +564,7 @@ h3 {
 
 .tabbar {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 6px;
   padding-bottom: 6px;
 }
@@ -481,7 +572,8 @@ h3 {
 .tabbar button {
   background: transparent;
   color: var(--muted);
-  padding: 10px 4px;
+  padding: 10px 2px;
+  font-size: 0.78rem;
 }
 
 .tabbar button[aria-current="page"] {

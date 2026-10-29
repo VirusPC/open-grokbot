@@ -7,9 +7,14 @@ const LAYERS = [
     file: "src/agents/desk.ts · src/client/App.tsx",
   },
   {
-    concept: "多 Agent",
-    where: "research 工具是 agentTool(ResearcherAgent)，子代理有自己的 Durable Object。",
+    concept: "父子委派",
+    where: "research 是 agentTool(ResearcherAgent)。子 Think 嵌在 Desk 这一回合里。",
     file: "src/tools/builtin.ts · src/agents/researcher.ts",
+  },
+  {
+    concept: "并列同事",
+    where: "登记表发现同事，房间按 id 叫醒 PeerAgent。不经过 agentTool，也不是完整的分身记忆。",
+    file: "src/agents/registry.ts · room.ts · peer.ts",
   },
   {
     concept: "Skills",
