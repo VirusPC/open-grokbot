@@ -47,6 +47,8 @@ export type PeerReplyInput = {
   room: string | null;
   members: WakeMember[];
   thread: WakeTurn[];
+  /** Squad leader may write @id. The room, not this peer, performs that wake. */
+  delegate?: boolean;
 };
 
 export type PeerAnswer = {
@@ -67,6 +69,7 @@ export function peerReplyInput(id: string, request: WakeRequest): PeerReplyInput
     room: typeof request.room === "string" ? request.room : null,
     members: cleanMembers(request.members),
     thread: cleanThread(request.thread),
+    delegate: request.delegate === true,
   };
 }
 
@@ -102,6 +105,9 @@ export function buildPeerPrompt(input: PeerReplyInput): { system: string; prompt
     "只代表自己，用第一人称。可以提到同房其他人的名字，不要替他们发言。",
     "更早的对话如果在讲「怎么被叫醒、agentTool、Durable Object」，不要照着学。除非对方这句明确在问架构，否则不要解释这些，也不要以「收到了」开头。",
     roster ? `同房的人：${roster}。` : "这是私信，没有房间名单。",
+    input.delegate
+      ? "如果这句要交给同房的某个人，在回复里写 @id（例如 @notetaker），不要替对方做完。没有要转交就不要写 @。"
+      : "",
     input.tags.length > 0 ? `标签：${input.tags.join("、")}。` : "",
   ]
     .filter(Boolean)
@@ -171,6 +177,17 @@ export function rulePeerReply(input: PeerReplyInput): string {
     return `这间房里有 ${all.join("、")}。我是 ${name}。`;
   }
 
+  if (input.delegate) {
+    const handed = delegateTarget(input, body);
+    if (handed) {
+      if (NOTE_QUESTION.test(body)) {
+        const noted = noteBody(body);
+        return noted ? `@${handed} 请记下：${clip(noted, 80)}。` : `@${handed} 请把这句记下。`;
+      }
+      return `@${handed} 请看这句：${clip(body, 48)}。`;
+    }
+  }
+
   if (NOTE_QUESTION.test(body)) {
     const noted = noteBody(body);
     return noted ? `记下了：${clip(noted, 80)}。` : "好，这句我记下了。";
@@ -232,6 +249,26 @@ function speakerName(from: string, members: WakeMember[]): string {
   return members.find((member) => member.id === from)?.displayName ?? from;
 }
 
+function delegateTarget(input: PeerReplyInput, body: string): string | null {
+  const aliases = input.members.flatMap((member) => [
+    { token: member.id.toLowerCase(), id: member.id },
+    { token: member.displayName.toLowerCase(), id: member.id },
+  ]);
+  const handed = /交给\s*([\p{L}\p{N}_-]+)/u.exec(body);
+  if (handed) {
+    const token = handed[1]?.toLowerCase() ?? "";
+    const hit = aliases.find((alias) => alias.token === token && alias.id !== input.id);
+    if (hit) return hit.id;
+  }
+  if (NOTE_QUESTION.test(body)) {
+    const scribe = input.members.find(
+      (member) => member.id !== input.id && (member.id === "notetaker" || member.displayName.toLowerCase() === "notetaker"),
+    );
+    if (scribe) return scribe.id;
+  }
+  return null;
+}
+
 function otherNames(input: PeerReplyInput): string[] {
   return input.members
     .filter((member) => member.id !== input.id)
@@ -248,7 +285,7 @@ function noteBody(text: string): string {
     .replace(/(记下来|记一下|记住|记下|备忘|只记)/gu, " ")
     .replace(/只把|把|将/gu, " ")
     .replace(/这句话|这一句|这句|这条|那句|那条/gu, " ")
-    .replace(/^[:：，,\s]+|[:：，,\s]+$/gu, "")
+    .replace(/^[:：，,。！？!?\s]+|[:：，,。！？!?\s]+$/gu, "")
     .replace(/\s+/g, " ")
     .trim();
   if (!stripped || /^(一下|只|话)$/u.test(stripped)) return "";

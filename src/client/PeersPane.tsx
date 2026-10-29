@@ -1,5 +1,7 @@
 import { useAgent } from "agents/react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type RefObject } from "react";
+import { createPortal } from "react-dom";
+import { handoffStillOpen } from "../agents/fanout";
 import type { RoomAgent } from "../agents/room";
 import type { TeammateRegistry } from "../agents/registry";
 import {
@@ -11,17 +13,21 @@ import {
   initialRoomState,
   type RegistryState,
   type RoomMessage,
+  type RoomRouting,
   type RoomState,
   type Teammate,
 } from "../agents/peer-types";
+import { routingHint } from "../agents/routing";
 import { normalizeSessionName } from "../agents/state";
 import { formatStamp } from "./format";
+import { pinRoomScrollTop } from "./room-scroll";
 
 const SUGGESTIONS = [
-  "你们叫什么名字",
-  "大家好，我是来看并列交接的",
+  "hello各位",
+  "desk 在吗",
+  "帮我记一下：明天评审",
   "@notetaker 只把这句话记下来",
-  "@desk @researcher 这条不走父回合",
+  "@all 大家打个招呼",
 ];
 
 export function PeersPane() {
@@ -41,6 +47,8 @@ export function PeersPane() {
   const [registerTags, setRegisterTags] = useState("");
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [registerPending, setRegisterPending] = useState(false);
+  const paneScrollRef = useRef<HTMLDivElement>(null);
+  const [dockEl, setDockEl] = useState<HTMLDivElement | null>(null);
 
   const registry = useAgent<TeammateRegistry, RegistryState>({
     agent: "TeammateRegistry",
@@ -107,7 +115,7 @@ export function PeersPane() {
 
   return (
     <section className="pane peers-pane" aria-label="同事">
-      <div className="pane-scroll">
+      <div className="pane-scroll" ref={paneScrollRef}>
         <p className="eyebrow">Peers</p>
         <h2>并列，不是父子。</h2>
         <p className="lede">
@@ -299,16 +307,24 @@ export function PeersPane() {
             </p>
           ) : null}
           <p className="empty-inline">
-            没有 @ 广播给成员。点下面的 @ 或自己写 <code>@notetaker</code>，就只叫醒被点名的人。
+            默认 Teams：看见线程不等于每个人都要回复。可改成 Squad，没写 <code>@</code> 只找队长。
           </p>
         </form>
 
         {joined ? (
-          <RoomSession key={`${joined.name}:${joined.memberIds.join(",")}`} name={joined.name} memberIds={joined.memberIds} teammates={teammates} />
+          <RoomSession
+            key={`${joined.name}:${joined.memberIds.join(",")}`}
+            name={joined.name}
+            memberIds={joined.memberIds}
+            teammates={teammates}
+            scrollRef={paneScrollRef}
+            dockEl={dockEl}
+          />
         ) : (
           <p className="empty-inline">还没有创建房间。默认 lobby，三位种子同事都在里面。</p>
         )}
       </div>
+      <div ref={setDockEl} className="room-dock-slot" hidden={joined === null} />
     </section>
   );
 }
@@ -317,18 +333,19 @@ function RoomSession({
   name,
   memberIds,
   teammates,
+  scrollRef,
+  dockEl,
 }: {
   name: string;
   memberIds: string[];
   teammates: Teammate[];
+  scrollRef: RefObject<HTMLDivElement | null>;
+  dockEl: HTMLElement | null;
 }) {
   const [ready, setReady] = useState(false);
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const roomRef = useRef<HTMLDivElement>(null);
-  const transcriptRef = useRef<HTMLOListElement>(null);
-  const composerRef = useRef<HTMLFormElement>(null);
   const memberKey = memberIds.join(",");
 
   const room = useAgent<RoomAgent, RoomState>({
@@ -359,22 +376,23 @@ function RoomSession({
     };
   }, [ready, memberKey]);
 
-  const state = room.state ?? initialRoomState;
+  const state = normalizeRoom(room.state);
   const names = new Map(teammates.map((mate) => [mate.id, mate.displayName]));
   const mentionIds = state.opened && state.memberIds.length > 0 ? state.memberIds : memberIds;
+  const waiting = pending || handoffStillOpen(state.messages);
 
   useEffect(() => {
-    const scroller = roomRef.current?.closest(".pane-scroll");
-    if (!(scroller instanceof HTMLElement)) return;
-    const tail = composerRef.current ?? roomRef.current;
-    if (!tail) return;
-    const last = transcriptRef.current?.lastElementChild;
-    revealRoomEnd(scroller, last instanceof HTMLElement ? last : null, tail);
-  }, [name, state.messages.length]);
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const frame = requestAnimationFrame(() => {
+      scroller.scrollTop = pinRoomScrollTop(scroller.scrollTop, scroller.scrollHeight, scroller.clientHeight);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [name, state.messages.length, scrollRef]);
 
   async function send(text: string) {
     const clean = text.trim();
-    if (!clean || pending || !ready) return;
+    if (!clean || waiting || !ready) return;
     setPending(true);
     setError(null);
     try {
@@ -391,28 +409,61 @@ function RoomSession({
     }
   }
 
-  return (
-    <div className="room-block" ref={roomRef}>
-      <h3>
-        房间 {name}
-        <span className="peer-meta">{state.opened ? "已进入" : ready ? "正在创建" : "正在连接"}</span>
-      </h3>
-      {state.messages.length === 0 ? (
-        <p className="empty-inline">房间线程还是空的。创建成功后，这里会出现一条说明。</p>
-      ) : (
-        <ol className="transcript" aria-live="polite" ref={transcriptRef}>
-          {state.messages.map((message) => (
-            <li key={message.id} className={`bubble bubble-${bubbleClass(message)}`}>
-              <span className="who">{whoLabel(message, names)}</span>
-              <p className="text-part">{message.text}</p>
-              {message.handoff ? <span className="handoff">{handoffLabel(message)}</span> : null}
-              {message.kind === "peer" ? (
-                <span className="handoff">并列回复 · 非 agentTool</span>
-              ) : null}
-            </li>
-          ))}
-        </ol>
-      )}
+  const routing: RoomRouting = state.routing === "squad" ? "squad" : "teams";
+  const leaderId = state.memberIds.includes(state.leaderId || "")
+    ? (state.leaderId as string)
+    : state.memberIds.includes("desk")
+      ? "desk"
+      : state.memberIds[0] ?? "desk";
+
+  async function setMode(next: RoomRouting, nextLeader = leaderId) {
+    if (!ready || waiting) return;
+    setError(null);
+    try {
+      const result = await room.stub.setRouting({ routing: next, leaderId: nextLeader });
+      if (!result.ok) setError(result.error);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "切换路由失败");
+    }
+  }
+
+  const dock = (
+    <div className="room-dock">
+      <div className="chip-row" role="group" aria-label="房间路由">
+        <button
+          type="button"
+          className="chip"
+          aria-pressed={routing === "teams"}
+          disabled={!ready || waiting || !state.opened}
+          onClick={() => void setMode("teams")}
+        >
+          Teams
+        </button>
+        <button
+          type="button"
+          className="chip"
+          aria-pressed={routing === "squad"}
+          disabled={!ready || waiting || !state.opened}
+          onClick={() => void setMode("squad")}
+        >
+          Squad
+        </button>
+        {routing === "squad"
+          ? mentionIds.map((id) => (
+              <button
+                key={id}
+                type="button"
+                className="chip"
+                aria-pressed={id === leaderId}
+                disabled={!ready || waiting || !state.opened}
+                onClick={() => void setMode("squad", id)}
+              >
+                队长 {names.get(id) ?? id}
+              </button>
+            ))
+          : null}
+      </div>
+      <p className="empty-inline">{routingHint(routing, leaderId)}</p>
       {error ? (
         <p className="banner error" role="alert">
           {error}
@@ -424,7 +475,7 @@ function RoomSession({
             key={id}
             type="button"
             className="chip"
-            disabled={!ready || pending || !state.opened}
+            disabled={!ready || waiting || !state.opened}
             onClick={() =>
               setDraft((current) => {
                 const prefix = current.length > 0 && !/\s$/u.test(current) ? `${current} ` : current;
@@ -437,7 +488,6 @@ function RoomSession({
         ))}
       </div>
       <form
-        ref={composerRef}
         className="composer"
         onSubmit={(event) => {
           event.preventDefault();
@@ -447,8 +497,14 @@ function RoomSession({
         <textarea
           rows={2}
           value={draft}
-          placeholder={state.opened ? "写给房间。@id 只叫醒那一位。" : "等房间打开"}
-          disabled={!ready || !state.opened}
+          placeholder={
+            state.opened
+              ? routing === "squad"
+                ? "写给房间。没 @ 只找队长。"
+                : "写给房间。@、@all，或单独写名字才会叫醒。"
+              : "等房间打开"
+          }
+          disabled={!ready || waiting || !state.opened}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -458,8 +514,8 @@ function RoomSession({
           }}
         />
         <div className="composer-actions">
-          <span className="peer-meta">{pending ? "正在交接" : "不经过 Think"}</span>
-          <button type="submit" className="primary" disabled={!ready || pending || !state.opened || !draft.trim()}>
+          <span className="peer-meta">{waiting ? "正在交接" : "不经过 Think"}</span>
+          <button type="submit" className="primary" disabled={!ready || waiting || !state.opened || !draft.trim()}>
             发送
           </button>
         </div>
@@ -469,7 +525,7 @@ function RoomSession({
               key={suggestion}
               type="button"
               className="chip"
-              disabled={!ready || pending || !state.opened}
+              disabled={!ready || waiting || !state.opened}
               onClick={() => void send(suggestion)}
             >
               {suggestion}
@@ -479,28 +535,32 @@ function RoomSession({
       </form>
     </div>
   );
-}
 
-/**
- * Move the peers scroller just far enough to show the newest line and the
- * composer. scrollIntoView walks every ancestor and, with a sticky composer,
- * lands in the empty region under the thread.
- */
-function revealRoomEnd(scroller: HTMLElement, message: HTMLElement | null, tail: HTMLElement) {
-  const view = scroller.getBoundingClientRect();
-  const tailBox = tail.getBoundingClientRect();
-  let delta = tailBox.bottom - view.bottom + 8;
-  if (message && delta > 0) {
-    const messageBox = message.getBoundingClientRect();
-    // Keep the newest bubble on screen when the composer is taller than the pane.
-    // Clipping the top of that bubble is fine; hiding the composer is not.
-    if (messageBox.bottom - delta < view.top + 24) {
-      delta = messageBox.bottom - view.bottom + 8;
-    }
-  }
-  if (delta <= 1) return;
-  const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-  scroller.scrollTop = Math.min(maxTop, scroller.scrollTop + delta);
+  return (
+    <div className="room-block">
+      <h3>
+        房间 {name}
+        <span className="peer-meta">{state.opened ? "已进入" : ready ? "正在创建" : "正在连接"}</span>
+      </h3>
+      {state.messages.length === 0 ? (
+        <p className="empty-inline">房间线程还是空的。创建成功后，这里会出现一条说明。</p>
+      ) : (
+        <ol className="transcript" aria-live="polite">
+          {state.messages.map((message) => (
+            <li key={message.id} className={`bubble bubble-${bubbleClass(message)}`}>
+              <span className="who">{whoLabel(message, names)}</span>
+              <p className="text-part">{message.text}</p>
+              {message.handoff ? <span className="handoff">{handoffLabel(message)}</span> : null}
+              {message.kind === "peer" ? (
+                <span className="handoff">并列回复 · 非 agentTool</span>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      )}
+      {dockEl ? createPortal(dock, dockEl) : null}
+    </div>
+  );
 }
 
 function bubbleClass(message: RoomMessage): string {
@@ -515,12 +575,40 @@ function whoLabel(message: RoomMessage, names: Map<string, string>): string {
   return names.get(message.authorId) ?? message.authorId;
 }
 
+function normalizeRoom(state: RoomState | undefined): RoomState {
+  const base = state ?? initialRoomState;
+  const memberIds = base.memberIds ?? [];
+  const leaderId = memberIds.includes(base.leaderId || "")
+    ? (base.leaderId as string)
+    : memberIds.includes("desk")
+      ? "desk"
+      : memberIds[0] ?? "desk";
+  return {
+    ...initialRoomState,
+    ...base,
+    memberIds,
+    messages: base.messages ?? [],
+    routing: base.routing === "squad" ? "squad" : "teams",
+    leaderId,
+  };
+}
+
 function handoffLabel(message: RoomMessage): string {
   const handoff = message.handoff;
   if (!handoff) return "";
   if (handoff.rule === "broadcast") {
     return `广播给 ${handoff.targets.join("、") || "（没有成员）"}`;
   }
+  if (handoff.rule === "addressed") {
+    return handoff.targets.length === 0 ? "没有单独点到名字" : `点到名字，只叫醒 ${handoff.targets.join("、")}`;
+  }
+  if (handoff.rule === "leader") {
+    const [leader, ...rest] = handoff.targets;
+    if (!leader) return "队长不在房间里";
+    if (rest.length === 0) return `只叫醒队长 ${leader}`;
+    return `队长 ${leader} 先答，再叫醒 ${rest.join("、")}`;
+  }
+  if (handoff.rule === "silent") return "没有点名，所以没有叫醒";
   if (handoff.targets.length === 0) return "点名，但没有叫醒任何人";
   return `只叫醒 ${handoff.targets.join("、")}`;
 }

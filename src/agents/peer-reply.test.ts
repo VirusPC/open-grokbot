@@ -26,6 +26,7 @@ function input(patch: Partial<PeerReplyInput> & Pick<PeerReplyInput, "id" | "tex
     thread: patch.thread ?? [],
     id: patch.id,
     text: patch.text,
+    delegate: patch.delegate === true,
   };
 }
 
@@ -65,6 +66,17 @@ test("a direct name question and a mention still answer as that peer", () => {
       }),
     ),
     "我是 NoteTaker。",
+  );
+});
+
+test("a squad leader delegates a note with @ and does not answer it alone", () => {
+  assert.equal(
+    rulePeerReply(input({ id: "desk", displayName: "Desk", delegate: true, text: "帮我记一下：明天评审" })),
+    "@notetaker 请记下：明天评审。",
+  );
+  assert.equal(
+    rulePeerReply(input({ id: "desk", displayName: "Desk", text: "帮我记一下：明天评审" })),
+    "记下了：明天评审。",
   );
 });
 

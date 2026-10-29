@@ -47,9 +47,9 @@ Think 在构造时会包一层 `onStart`：先建好 session 和 context，再�
 
 读 [PEERS.md](./PEERS.md)，再按这个顺序看代码：
 
-1. `src/agents/peer-types.ts` 的 `planHandoff`：没有 `@` 就广播，有 `@` 只叫醒房间里被点名的人。
+1. `src/agents/routing.ts` 的 `planRoomRoute`：Teams 只在 `@`、`@all` 或单独写出的名字上叫醒；Squad 没 `@` 只叫醒队长，队长回复里的 `@` 再扇出。
 2. `src/agents/registry.ts`：种子是 Desk、Researcher、NoteTaker。Desk 是一行，不是别人的父进程。
-3. `src/agents/room.ts` 的 `postMessage`：`getAgentByName(PeerAgent, id)`。同伴把回复交回来，房间自己追加。同伴不回头 `fetch` 这个房间，否则同一个 Durable Object 会把自己等死。
+3. `src/agents/room.ts` 的 `postMessage` 和 `src/agents/fanout.ts`：广播和 `@` 都用 `Promise.allSettled` 并行 `getAgentByName(PeerAgent, id)`。同伴把回复交回来，房间自己追加。同伴不回头 `fetch` 这个房间，否则同一个 Durable Object 会把自己等死。页面先返回你的那一句，回复靠 `setState` 推上来。
 4. `src/agents/peer.ts` 和 `peer-reply.ts`：叫醒时带上房间线程，用和 Desk 相同的模型短答。模型不可用时按显示名回答，不把架构说明当成正文。`wakeCount` 写在实例自己的状态里。常驻是这个名字还能被叫醒，不是 CPU 一直开着。
 5. `src/client/PeersPane.tsx`：同事列表、创建房间、`@`。
 
