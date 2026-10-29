@@ -6,7 +6,7 @@
 - `src/agents/peer-types.ts`：并列同事的类型，以及广播 / @ 的 `planHandoff`
 - `src/agents/registry.ts`：`TeammateRegistry`，种子 Desk、Researcher、NoteTaker
 - `src/agents/room.ts`：`RoomAgent`，按 id 交接，不嵌进 Think
-- `src/agents/peer.ts`：`PeerAgent` 规则回复
+- `src/agents/peer.ts`：`PeerAgent` 按房间线程回答；模型不可用时走 `peer-reply.ts` 的短规则
 - `src/peers/http.ts`：`/api/teammates`、`/api/rooms/*`、`/api/peers/*`
 - `src/client/PeersPane.tsx`：同事列表、创建房间、@
 - `src/agents/model.ts`：`createAI({ binding })`，可选 OpenAI

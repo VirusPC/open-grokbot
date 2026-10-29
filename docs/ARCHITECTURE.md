@@ -32,7 +32,7 @@ ResearcherAgent  另一个 Think Durable Object
 并列（同事页，不进上面的 Think 回合）
   TeammateRegistry     发现。Desk 只是其中一行
   RoomAgent            频道。广播，或只叫醒 @
-  PeerAgent            按 id 唤醒，规则回复写回房间
+  PeerAgent            按 id 唤醒，按线程回答后写回房间
 ```
 
 `desktop/` 是可选的 Electron 窗口，在 macOS 上打开同一份 H5，默认指向本机实验桌 `http://127.0.0.1:43123`。`OPEN_GROKBOT_URL` 可以改成任意 http(s) 地址。它不在这条请求路径里，也不改 Think。

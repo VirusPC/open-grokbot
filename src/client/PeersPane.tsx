@@ -18,6 +18,7 @@ import { normalizeSessionName } from "../agents/state";
 import { formatStamp } from "./format";
 
 const SUGGESTIONS = [
+  "你们叫什么名字",
   "大家好，我是来看并列交接的",
   "@notetaker 只把这句话记下来",
   "@desk @researcher 这条不走父回合",
@@ -115,7 +116,7 @@ export function PeersPane() {
           <code>PeerAgent</code> 按 id 被叫醒。
         </p>
         <p className="lede">
-          常驻是 Durable Object 的身份，可以休眠后再按名字唤醒，不是一直占着 CPU。这里没有做完整的分身记忆隔离。
+          常驻是 Durable Object 的身份，可以休眠后再按名字唤醒，不是一直占着 CPU。叫醒之后，对方按房间里的对话回答，而不是复述这套结构。这里没有做完整的分身记忆隔离。
         </p>
 
         <h3>
@@ -404,7 +405,7 @@ function RoomSession({
               <p className="text-part">{message.text}</p>
               {message.handoff ? <span className="handoff">{handoffLabel(message)}</span> : null}
               {message.kind === "peer" ? (
-                <span className="handoff">PeerAgent 规则回复 · 非 agentTool</span>
+                <span className="handoff">并列回复 · 非 agentTool</span>
               ) : null}
             </li>
           ))}
