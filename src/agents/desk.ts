@@ -71,7 +71,7 @@ export class DeskAgent extends Think<Env, DeskState> {
   }
 
   override getTools() {
-    return createDeskTools(this);
+    return createDeskTools(this, { env: this.env, ctx: this.ctx, name: this.name });
   }
 
   override getScheduledTasks() {

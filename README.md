@@ -17,7 +17,7 @@
 | Tools / MCP | `get_time`、记忆读写；`addMcpServer` 挂载点 |
 | 外部事件 | `POST /webhooks/ping` |
 
-更细的请求路径在 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。并列同事和 `agentTool` 的差别在 [docs/PEERS.md](docs/PEERS.md)。建议的阅读顺序在 [docs/LEARNING.md](docs/LEARNING.md)。
+更细的请求路径在 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。并列同事和 `agentTool` 的差别在 [docs/PEERS.md](docs/PEERS.md)。同事页的 Langfuse 追踪在 [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md)。建议的阅读顺序在 [docs/LEARNING.md](docs/LEARNING.md)。
 
 ## 本地运行
 
@@ -133,6 +133,7 @@ src/agents/registry.ts  并列同事登记表
 src/agents/room.ts      房间频道
 src/agents/peer.ts      按 id 叫醒，按线程回答
 src/peers/http.ts       /api/teammates、/api/rooms、/api/peers
+src/observe/            Langfuse。没密钥时是空操作
 src/tools/              get_time、记忆、agentTool、MCP 钩子
 src/memory/ledger.ts    记忆账本
 src/client/             H5，含同事页

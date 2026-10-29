@@ -10,3 +10,10 @@
 
 # Optional. A Streamable HTTP MCP endpoint. Desk calls addMcpServer only when this is set.
 # MCP_SERVER_URL=https://example.com/mcp
+
+# Optional Langfuse traces for the peer room (同事页) and desk.research.
+# All three must be set. If any is missing, chat still works and nothing is sent.
+# Create a new Langfuse project, then paste that project's keys. Do not commit them.
+# LANGFUSE_PUBLIC_KEY=
+# LANGFUSE_SECRET_KEY=
+# LANGFUSE_BASE_URL=https://langfuse.viruspc.tech

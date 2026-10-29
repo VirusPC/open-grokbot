@@ -73,3 +73,7 @@ curl -s http://127.0.0.1:43123/api/peers/notetaker
 ```
 
 `GET /api/peers/notetaker` 的 `wakeCount` 是这个 Peer Durable Object 自己记下的，和登记表上的次数应对得上。实例名就是 id。
+
+## Langfuse
+
+房间交接和每次叫醒可以记到自建 Langfuse。没设置 `LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY`、`LANGFUSE_BASE_URL` 时，上面的 curl 和页面行为不变，也不会发追踪请求。密钥怎么放、trace 长什么样，见 [OBSERVABILITY.md](./OBSERVABILITY.md)。

@@ -45,6 +45,7 @@ ResearcherAgent  另一个 Think Durable Object
 | --- | --- |
 | 流式对话 | Think 内建回合 + 浏览器 `useAgent` / `useAgentChat`（`syncMessagesToServer: false`，因为 Think 的会话树才是原文） |
 | 父子委派 | `src/tools/builtin.ts` 里的 `agentTool(ResearcherAgent)`；子类在 `src/agents/researcher.ts` |
+| 同事页追踪 | `src/observe/langfuse.ts`。三个 Langfuse 密钥缺一时不发请求。见 [OBSERVABILITY.md](./OBSERVABILITY.md) |
 | 并列同事 | `TeammateRegistry` + `RoomAgent` + `PeerAgent`。按 id 交接，不嵌在 Think 里。不是完整的分身记忆。见 [PEERS.md](./PEERS.md) |
 | Skills | `skills/<name>/SKILL.md`。`src/skills.ts` 用 Vite 插件的 `agents:skills/../skills` 打包，Desk `getSkills()` 返回这一份。模型用 `activate_skill` 按需加载 |
 | Memory | `configureContext()` 的可写 `memory` 块；`memory_write` / `memory_read` 以及面板的 `@callable remember` 写入 `lab_memory`，再投影回该块 |

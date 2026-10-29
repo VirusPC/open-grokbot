@@ -111,6 +111,19 @@ export type WakeRequest = {
    * The room parses that text. This peer does not call the room back.
    */
   delegate?: boolean;
+  /**
+   * Parent Langfuse span, when the room is exporting this wake.
+   * Absent, or ignored, when tracing is off. Not shown to the model.
+   */
+  trace?: WakeTrace | null;
+};
+
+/** Cross-isolate parent for a peer span. Ids are W3C hex. */
+export type WakeTrace = {
+  traceId: string;
+  spanId: string;
+  mode?: RoomRouting;
+  rule?: HandoffRule;
 };
 
 export type WakeResult = {
