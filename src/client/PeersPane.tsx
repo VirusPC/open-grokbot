@@ -239,11 +239,11 @@ export function PeersPane() {
                 {registerError}
               </p>
             ) : null}
-            <p className="empty-inline">登记不会自动进房间。勾选后再开房。@ 匹配 id 或显示名。</p>
+            <p className="empty-inline">登记不会自动进房间。勾选后再创建房间。@ 匹配 id 或显示名。</p>
           </form>
         </details>
 
-        <h3>开房</h3>
+        <h3>创建房间</h3>
         <form
           className="stack-form"
           onSubmit={(event) => {
@@ -290,7 +290,7 @@ export function PeersPane() {
             ))}
           </fieldset>
           <button type="submit" className="primary" disabled={!ready || selected.length === 0}>
-            开房（{selected.filter((id) => teammates.some((mate) => mate.id === id)).length} 人）
+            创建房间（{selected.filter((id) => teammates.some((mate) => mate.id === id)).length} 人）
           </button>
           {formError ? (
             <p className="banner error" role="alert">
@@ -305,7 +305,7 @@ export function PeersPane() {
         {joined ? (
           <RoomSession key={`${joined.name}:${joined.memberIds.join(",")}`} name={joined.name} memberIds={joined.memberIds} teammates={teammates} />
         ) : (
-          <p className="empty-inline">还没开房间。默认 lobby，三位种子同事都在里面。</p>
+          <p className="empty-inline">还没有创建房间。默认 lobby，三位种子同事都在里面。</p>
         )}
       </div>
     </section>
@@ -349,7 +349,7 @@ function RoomSession({
         if (!result.ok) setError(result.error);
       })
       .catch((caught: unknown) => {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : "开房失败");
+        if (!cancelled) setError(caught instanceof Error ? caught.message : "创建房间失败");
       });
     return () => {
       cancelled = true;
@@ -392,10 +392,10 @@ function RoomSession({
     <div className="room-block" ref={roomRef}>
       <h3>
         房间 {name}
-        <span className="peer-meta">{state.opened ? "已打开" : ready ? "正在开房" : "正在连接"}</span>
+        <span className="peer-meta">{state.opened ? "已进入" : ready ? "正在创建" : "正在连接"}</span>
       </h3>
       {state.messages.length === 0 ? (
-        <p className="empty-inline">房间线程还是空的。开房成功后，这里会出现一条说明。</p>
+        <p className="empty-inline">房间线程还是空的。创建成功后，这里会出现一条说明。</p>
       ) : (
         <ol className="transcript" aria-live="polite">
           {state.messages.map((message) => (

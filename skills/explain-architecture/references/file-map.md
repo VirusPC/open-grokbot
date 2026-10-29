@@ -8,7 +8,7 @@
 - `src/agents/room.ts`：`RoomAgent`，按 id 交接，不嵌进 Think
 - `src/agents/peer.ts`：`PeerAgent` 规则回复
 - `src/peers/http.ts`：`/api/teammates`、`/api/rooms/*`、`/api/peers/*`
-- `src/client/PeersPane.tsx`：同事列表、开房、@
+- `src/client/PeersPane.tsx`：同事列表、创建房间、@
 - `src/agents/model.ts`：`createAI({ binding })`，可选 OpenAI
 - `src/tools/builtin.ts`：`get_time`、`memory_write`、`memory_read`、`research`
 - `src/tools/mcp.ts`：`addMcpServer` 挂载点

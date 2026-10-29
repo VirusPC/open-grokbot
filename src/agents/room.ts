@@ -57,7 +57,7 @@ export class RoomAgent extends Agent<Env, RoomState> {
     }
     const ordered = orderMembers(memberIds, teammates.map((mate) => mate.id));
     if (ordered.length === 0) {
-      return { ok: false, error: "开房至少要有一位已登记的同事。" };
+      return { ok: false, error: "创建房间至少要有一位已登记的同事。" };
     }
 
     const same =

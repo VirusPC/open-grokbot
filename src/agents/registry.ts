@@ -81,7 +81,7 @@ export class TeammateRegistry extends Agent<Env, RegistryState> {
           wakeCount: 0,
           lastWakeAt: null,
           lastKind: null,
-          note: "后来登记的同事。开房时勾选，才会成为房间成员。",
+          note: "后来登记的同事。创建房间时勾选，才会成为房间成员。",
         };
     const teammates = orderTeammates([
       ...this.state.teammates.filter((mate) => mate.id !== id),

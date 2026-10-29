@@ -51,7 +51,7 @@ Think 在构造时会包一层 `onStart`：先建好 session 和 context，再�
 2. `src/agents/registry.ts`：种子是 Desk、Researcher、NoteTaker。Desk 是一行，不是别人的父进程。
 3. `src/agents/room.ts` 的 `postMessage`：`getAgentByName(PeerAgent, id)`。同伴把回复交回来，房间自己追加。同伴不回头 `fetch` 这个房间，否则同一个 Durable Object 会把自己等死。
 4. `src/agents/peer.ts`：规则回复，不调用模型。`wakeCount` 写在实例自己的状态里。常驻是这个名字还能被叫醒，不是 CPU 一直开着。
-5. `src/client/PeersPane.tsx`：同事列表、开房、`@`。
+5. `src/client/PeersPane.tsx`：同事列表、创建房间、`@`。
 
 `src/agents/state.ts` 仍然只服务 Desk。并列状态在 `peer-types.ts`，因为 Worker 和 H5 都要读。
 

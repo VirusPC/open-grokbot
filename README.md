@@ -54,7 +54,7 @@ curl -s -X POST http://127.0.0.1:43123/webhooks/ping \
 
 `name` 要和页面上的实例名一致，默认 `lab`。响应里能看到 webhook 计数。`"turn": false` 时只写状态，不提交模型回合。
 
-4. **同事**（不需要模型）：切到「同事」。名单里有 Desk、Researcher、NoteTaker。点「开房」，再点「大家好，我是来看并列交接的」。三条回复都回来，并且标着广播。再点「`@notetaker` …」，这次只多一条 NoteTaker。这是按 id 叫醒，不是对话页里的 `agentTool`。步骤和 curl 在 [docs/PEERS.md](docs/PEERS.md)。
+4. **同事**（不需要模型）：切到「同事」。名单里有 Desk、Researcher、NoteTaker。点「创建房间」，再点「大家好，我是来看并列交接的」。三条回复都回来，并且标着广播。再点「`@notetaker` …」，这次只多一条 NoteTaker。这是按 id 叫醒，不是对话页里的 `agentTool`。步骤和 curl 在 [docs/PEERS.md](docs/PEERS.md)。
 
 健康检查：`GET /api/health`。
 
