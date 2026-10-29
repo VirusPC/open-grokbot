@@ -297,6 +297,12 @@ h3 {
   padding: 10px 12px;
 }
 
+.chip[aria-pressed="true"] {
+  border-style: solid;
+  border-color: var(--lime);
+  color: var(--lime);
+}
+
 .primary {
   background: var(--lime);
   color: var(--lime-ink);

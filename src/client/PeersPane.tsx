@@ -13,18 +13,21 @@ import {
   initialRoomState,
   type RegistryState,
   type RoomMessage,
+  type RoomRouting,
   type RoomState,
   type Teammate,
 } from "../agents/peer-types";
+import { routingHint } from "../agents/routing";
 import { normalizeSessionName } from "../agents/state";
 import { formatStamp } from "./format";
 import { pinRoomScrollTop } from "./room-scroll";
 
 const SUGGESTIONS = [
-  "你们叫什么名字",
-  "大家好，我是来看并列交接的",
+  "hello各位",
+  "desk 在吗",
+  "帮我记一下：明天评审",
   "@notetaker 只把这句话记下来",
-  "@desk @researcher 这条不走父回合",
+  "@all 大家打个招呼",
 ];
 
 export function PeersPane() {
@@ -304,7 +307,7 @@ export function PeersPane() {
             </p>
           ) : null}
           <p className="empty-inline">
-            没有 @ 广播给成员。点下面的 @ 或自己写 <code>@notetaker</code>，就只叫醒被点名的人。
+            默认 Teams：看见线程不等于每个人都要回复。可改成 Squad，没写 <code>@</code> 只找队长。
           </p>
         </form>
 
@@ -373,7 +376,7 @@ function RoomSession({
     };
   }, [ready, memberKey]);
 
-  const state = room.state ?? initialRoomState;
+  const state = normalizeRoom(room.state);
   const names = new Map(teammates.map((mate) => [mate.id, mate.displayName]));
   const mentionIds = state.opened && state.memberIds.length > 0 ? state.memberIds : memberIds;
   const waiting = pending || handoffStillOpen(state.messages);
@@ -406,8 +409,61 @@ function RoomSession({
     }
   }
 
+  const routing: RoomRouting = state.routing === "squad" ? "squad" : "teams";
+  const leaderId = state.memberIds.includes(state.leaderId || "")
+    ? (state.leaderId as string)
+    : state.memberIds.includes("desk")
+      ? "desk"
+      : state.memberIds[0] ?? "desk";
+
+  async function setMode(next: RoomRouting, nextLeader = leaderId) {
+    if (!ready || waiting) return;
+    setError(null);
+    try {
+      const result = await room.stub.setRouting({ routing: next, leaderId: nextLeader });
+      if (!result.ok) setError(result.error);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "切换路由失败");
+    }
+  }
+
   const dock = (
     <div className="room-dock">
+      <div className="chip-row" role="group" aria-label="房间路由">
+        <button
+          type="button"
+          className="chip"
+          aria-pressed={routing === "teams"}
+          disabled={!ready || waiting || !state.opened}
+          onClick={() => void setMode("teams")}
+        >
+          Teams
+        </button>
+        <button
+          type="button"
+          className="chip"
+          aria-pressed={routing === "squad"}
+          disabled={!ready || waiting || !state.opened}
+          onClick={() => void setMode("squad")}
+        >
+          Squad
+        </button>
+        {routing === "squad"
+          ? mentionIds.map((id) => (
+              <button
+                key={id}
+                type="button"
+                className="chip"
+                aria-pressed={id === leaderId}
+                disabled={!ready || waiting || !state.opened}
+                onClick={() => void setMode("squad", id)}
+              >
+                队长 {names.get(id) ?? id}
+              </button>
+            ))
+          : null}
+      </div>
+      <p className="empty-inline">{routingHint(routing, leaderId)}</p>
       {error ? (
         <p className="banner error" role="alert">
           {error}
@@ -441,7 +497,13 @@ function RoomSession({
         <textarea
           rows={2}
           value={draft}
-          placeholder={state.opened ? "写给房间。@id 只叫醒那一位。" : "等房间打开"}
+          placeholder={
+            state.opened
+              ? routing === "squad"
+                ? "写给房间。没 @ 只找队长。"
+                : "写给房间。@、@all，或单独写名字才会叫醒。"
+              : "等房间打开"
+          }
           disabled={!ready || waiting || !state.opened}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
@@ -513,12 +575,40 @@ function whoLabel(message: RoomMessage, names: Map<string, string>): string {
   return names.get(message.authorId) ?? message.authorId;
 }
 
+function normalizeRoom(state: RoomState | undefined): RoomState {
+  const base = state ?? initialRoomState;
+  const memberIds = base.memberIds ?? [];
+  const leaderId = memberIds.includes(base.leaderId || "")
+    ? (base.leaderId as string)
+    : memberIds.includes("desk")
+      ? "desk"
+      : memberIds[0] ?? "desk";
+  return {
+    ...initialRoomState,
+    ...base,
+    memberIds,
+    messages: base.messages ?? [],
+    routing: base.routing === "squad" ? "squad" : "teams",
+    leaderId,
+  };
+}
+
 function handoffLabel(message: RoomMessage): string {
   const handoff = message.handoff;
   if (!handoff) return "";
   if (handoff.rule === "broadcast") {
     return `广播给 ${handoff.targets.join("、") || "（没有成员）"}`;
   }
+  if (handoff.rule === "addressed") {
+    return handoff.targets.length === 0 ? "没有单独点到名字" : `点到名字，只叫醒 ${handoff.targets.join("、")}`;
+  }
+  if (handoff.rule === "leader") {
+    const [leader, ...rest] = handoff.targets;
+    if (!leader) return "队长不在房间里";
+    if (rest.length === 0) return `只叫醒队长 ${leader}`;
+    return `队长 ${leader} 先答，再叫醒 ${rest.join("、")}`;
+  }
+  if (handoff.rule === "silent") return "没有点名，所以没有叫醒";
   if (handoff.targets.length === 0) return "点名，但没有叫醒任何人";
   return `只叫醒 ${handoff.targets.join("、")}`;
 }

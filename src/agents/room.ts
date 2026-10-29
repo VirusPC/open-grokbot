@@ -9,24 +9,27 @@ import {
   normalizeAuthorId,
   normalizePostText,
   normalizeTeammateId,
-  planHandoff,
   type HandoffRule,
   type OpenResult,
   type PostResult,
   type RoomMessage,
+  type RoomRouting,
   type RoomState,
   type WakeMember,
+  type WakeReceipt,
   type WakeTurn,
 } from "./peer-types";
+import { effectiveLeader, planLeaderFanout, planRoomRoute, routingHint } from "./routing";
 
 /**
  * Channel / ingress for peer mode. Members and the transcript live here.
  *
  * postMessage does not run inside a Desk Think turn:
- *   1. planHandoff decides broadcast (every member) vs @-only (named subset)
- *   2. both rules call the same Promise.allSettled fan-out
- *   3. getAgentByName(env.PeerAgent, id) wakes each target together
- *   4. the peer returns a line that answers `text`; this room appends it
+ *   1. planRoomRoute picks Teams (addressed only) or Squad (leader, then @)
+ *   2. both modes wake targets together with Promise.allSettled
+ *   3. getAgentByName(env.PeerAgent, id) — the peer returns a line
+ *   4. a Squad leader reply that contains @ wakes those peers; the peer
+ *      does not call this room back
  *
  * The browser RPC returns after the human line is stored. Model time runs
  * in ctx.waitUntil, and setState pushes each batch of peer lines. One
@@ -34,8 +37,8 @@ import {
  *
  * The peer does not fetch this room back. A Durable Object waiting on its
  * own stub deadlocks the input gate. The room passes a snapshot of earlier
- * human and peer lines instead. Peer replies are `kind: "peer"` and are
- * not fanned out again.
+ * human and peer lines instead. Peer replies other than the squad leader's
+ * hand-off are not fanned out again.
  */
 export class RoomAgent extends Agent<Env, RoomState> {
   initialState: RoomState = {
@@ -45,8 +48,12 @@ export class RoomAgent extends Agent<Env, RoomState> {
   };
 
   override async onStart(): Promise<void> {
-    if (this.state.room === this.name) return;
-    this.setState({ ...this.state, room: this.name });
+    const routing = this.routingMode();
+    const leaderId = this.state.leaderId || "desk";
+    if (this.state.room === this.name && this.state.routing === routing && this.state.leaderId === leaderId) {
+      return;
+    }
+    this.setState({ ...this.state, room: this.name, routing, leaderId });
   }
 
   @callable()
@@ -79,14 +86,15 @@ export class RoomAgent extends Agent<Env, RoomState> {
       return { ok: true, state };
     }
 
+    const leaderId = effectiveLeader(this.state.leaderId || "desk", ordered) ?? ordered[0] ?? "desk";
     const notice = this.state.opened
-      ? `成员改为：${ordered.join("、")}。没有 @ 广播给这些同事；写了 @ 就只叫醒房间里被点名的人。`
-      : `房间已打开，成员：${ordered.join("、")}。没有 @ 广播给全体成员；写了 @id 或 @显示名，并且对方在房间里，就只叫醒被点名的人。交接是 getAgentByName(PeerAgent, id)，不经过 agentTool。`;
+      ? `成员改为：${ordered.join("、")}。${routingHint(this.routingMode(), leaderId)}`
+      : `房间已打开，成员：${ordered.join("、")}。${routingHint(this.routingMode(), leaderId)} 交接是 getAgentByName(PeerAgent, id)，不经过 agentTool。`;
 
     const next = this.commit([
       ...this.state.messages,
       systemMessage(notice),
-    ], ordered, true);
+    ], ordered, true, { leaderId });
     return { ok: true, state: next };
   }
 
@@ -114,7 +122,15 @@ export class RoomAgent extends Agent<Env, RoomState> {
       displayName: names.get(id) ?? id,
     }));
     const thread = selectWakeThread(this.state.messages, names);
-    const plan = planHandoff(text, this.state.memberIds, teammates);
+    const routing = this.routingMode();
+    const leaderId = effectiveLeader(this.state.leaderId || "desk", this.state.memberIds) ?? "desk";
+    const plan = planRoomRoute({
+      mode: routing,
+      text,
+      memberIds: this.state.memberIds,
+      teammates,
+      leaderId,
+    });
     const humanId = crypto.randomUUID();
     const batch: RoomMessage[] = [
       {
@@ -141,6 +157,12 @@ export class RoomAgent extends Agent<Env, RoomState> {
     ) {
       batch.push(systemMessage("写了 @，但没有点到房间里的同事。"));
     }
+    if (plan.rule === "silent") {
+      batch.push(systemMessage("Teams：没有 @，也没有单独写出房间里的 id 或显示名，所以没有叫醒。看见线程不等于要回复。"));
+    }
+    if (plan.rule === "leader" && plan.targets.length === 0) {
+      batch.push(systemMessage("Squad：队长不在这个房间，所以没有叫醒。"));
+    }
 
     const anchorId = batch[batch.length - 1]?.id ?? humanId;
     const next = this.appendMessages(batch);
@@ -155,6 +177,8 @@ export class RoomAgent extends Agent<Env, RoomState> {
       targets: [...plan.targets],
       members,
       thread,
+      leaderId,
+      memberIds: [...this.state.memberIds],
       mates: teammates.map((mate) => ({
         id: mate.id,
         displayName: mate.displayName,
@@ -189,21 +213,14 @@ export class RoomAgent extends Agent<Env, RoomState> {
           tags: mate ? [...mate.tags] : [],
           members: job.members,
           thread: job.thread,
+          delegate: job.rule === "leader" && id === job.leaderId,
         });
         return { reply: wake.reply, wokeAt: wake.wokeAt };
       });
       const { lines, receipts } = linesFromFanout(job.humanId, settled);
       if (lines.length > 0) this.insertAfter(job.anchorId, lines);
-      if (receipts.length > 0) {
-        try {
-          const registry = await getAgentByName(this.env.TeammateRegistry, REGISTRY_NAME);
-          await registry.recordWakes(receipts);
-        } catch (error) {
-          this.appendMessages([
-            systemMessage(`登记叫醒次数失败：${errorText(error)}`, `registry:${job.humanId}`),
-          ]);
-        }
-      }
+      const moreReceipts = await this.fanOutLeaderReply(job, lines);
+      await this.recordReceipts(job.humanId, [...receipts, ...moreReceipts]);
       console.log(
         JSON.stringify({
           event: "room.handoff",
@@ -221,6 +238,105 @@ export class RoomAgent extends Agent<Env, RoomState> {
     });
   }
 
+  /** Squad only: @ inside the leader reply wakes those peers. They do not call back. */
+  private async fanOutLeaderReply(
+    job: HandoffJob,
+    lines: RoomMessage[],
+  ): Promise<WakeReceipt[]> {
+    if (job.rule !== "leader") return [];
+    const leaderLine = lines.find((line) => line.kind === "peer" && line.authorId === job.leaderId);
+    if (!leaderLine) return [];
+    const fan = planLeaderFanout(leaderLine.text, job.memberIds, job.mates, job.leaderId);
+    const notes: RoomMessage[] = [];
+    for (const token of fan.unknown) {
+      notes.push(systemMessage(`队长回复里的 @${token} 不在登记表里，没有叫醒。`));
+    }
+    for (const id of fan.outsideRoom) {
+      notes.push(systemMessage(`队长回复里的 @${id} 不在这个房间，没有叫醒。`));
+    }
+    if (fan.targets.length === 0) {
+      if (notes.length > 0) this.appendMessages(notes);
+      return [];
+    }
+    this.addHandoffTargets(job.humanId, fan.targets);
+    notes.unshift(systemMessage(`Squad：队长回复里点了 ${fan.targets.join("、")}，再叫醒。同伴不回头调用房间。`));
+    const noteAnchor = notes[notes.length - 1]?.id ?? leaderLine.id;
+    this.insertAfter(leaderLine.id, notes);
+    const names = new Map(job.mates.map((mate) => [mate.id, mate.displayName]));
+    const thread = selectWakeThread(
+      this.state.messages.filter((message) => message.id !== leaderLine.id),
+      names,
+    );
+    const settled = await settleFanout(fan.targets, async (id) => {
+      const peer = await getAgentByName(this.env.PeerAgent, id);
+      const mate = job.mates.find((item) => item.id === id);
+      const wake = await peer.wake({
+        kind: "room",
+        text: leaderLine.text,
+        room: this.name,
+        from: job.leaderId,
+        displayName: mate?.displayName ?? id,
+        tags: mate ? [...mate.tags] : [],
+        members: job.members,
+        thread,
+      });
+      return { reply: wake.reply, wokeAt: wake.wokeAt };
+    });
+    const second = linesFromFanout(job.humanId, settled);
+    if (second.lines.length > 0) this.insertAfter(noteAnchor, second.lines);
+    return second.receipts;
+  }
+
+  private addHandoffTargets(humanId: string, extra: string[]): void {
+    const messages = this.state.messages.map((message) => {
+      if (message.id !== humanId || !message.handoff) return message;
+      const targets = [...message.handoff.targets];
+      for (const id of extra) {
+        if (!targets.includes(id)) targets.push(id);
+      }
+      return { ...message, handoff: { rule: message.handoff.rule, targets } };
+    });
+    this.commit(messages, this.state.memberIds, this.state.opened);
+  }
+
+  private async recordReceipts(humanId: string, receipts: WakeReceipt[]): Promise<void> {
+    if (receipts.length === 0) return;
+    try {
+      const registry = await getAgentByName(this.env.TeammateRegistry, REGISTRY_NAME);
+      await registry.recordWakes(receipts);
+    } catch (error) {
+      this.appendMessages([
+        systemMessage(`登记叫醒次数失败：${errorText(error)}`, `registry:${humanId}`),
+      ]);
+    }
+  }
+
+  @callable()
+  async setRouting(input?: { routing?: string; leaderId?: string }): Promise<OpenResult> {
+    if (!this.state.opened) return { ok: false, error: "这个房间还没打开。" };
+    const routing = input?.routing === "squad" ? "squad" : input?.routing === "teams" ? "teams" : null;
+    if (!routing) return { ok: false, error: "路由只能是 teams 或 squad。" };
+    const requested = input?.leaderId === undefined ? undefined : normalizeTeammateId(input.leaderId);
+    if (input?.leaderId !== undefined && (!requested || !this.state.memberIds.includes(requested))) {
+      return { ok: false, error: "队长必须是房间里的同事。" };
+    }
+    const leaderId = requested ?? effectiveLeader(this.state.leaderId || "desk", this.state.memberIds) ?? "desk";
+    const current = this.routingMode();
+    if (routing === current && leaderId === (this.state.leaderId || "desk")) {
+      return { ok: true, state: this.snapshot() };
+    }
+    const notice = routing === "squad"
+      ? `已切换到 Squad，队长是 ${leaderId}。没写 @ 只叫醒队长。队长回复里的 @ 再交给被点名的人。你自己写了 @ 就不会再自动叫醒队长。`
+      : "已切换到 Teams。大家都能看见线程。只有 @、@all，或单独写出的 id／显示名才会回复。没有点名就不会叫醒。";
+    const next = this.commit(
+      [...this.state.messages, systemMessage(notice)],
+      this.state.memberIds,
+      true,
+      { routing, leaderId },
+    );
+    return { ok: true, state: next };
+  }
+
   private appendMessages(extra: RoomMessage[]): RoomState {
     return this.insertAfter(null, extra);
   }
@@ -236,19 +352,36 @@ export class RoomAgent extends Agent<Env, RoomState> {
   }
 
   async view(): Promise<RoomState> {
+    return this.snapshot();
+  }
+
+  private routingMode(): RoomRouting {
+    return this.state.routing === "squad" ? "squad" : "teams";
+  }
+
+  private snapshot(): RoomState {
     return {
-      ...this.state,
       room: this.state.room || this.name,
+      opened: this.state.opened,
       memberIds: [...this.state.memberIds],
       messages: this.state.messages.map((message) => ({ ...message })),
+      routing: this.routingMode(),
+      leaderId: this.state.leaderId || "desk",
     };
   }
 
-  private commit(messages: RoomMessage[], memberIds: string[], opened: boolean): RoomState {
+  private commit(
+    messages: RoomMessage[],
+    memberIds: string[],
+    opened: boolean,
+    patch?: { routing?: RoomRouting; leaderId?: string },
+  ): RoomState {
     const next: RoomState = {
       room: this.name,
       opened,
       memberIds: [...memberIds],
+      routing: patch?.routing ?? this.routingMode(),
+      leaderId: patch?.leaderId ?? (this.state.leaderId || "desk"),
       messages: messages.slice(-MAX_ROOM_MESSAGES).map((message) => ({
         ...message,
         handoff: message.handoff
@@ -285,6 +418,8 @@ type HandoffJob = {
   targets: string[];
   members: WakeMember[];
   thread: WakeTurn[];
+  leaderId: string;
+  memberIds: string[];
   mates: Array<{ id: string; displayName: string; tags: string[] }>;
 };
 

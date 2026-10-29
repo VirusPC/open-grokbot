@@ -19,7 +19,12 @@ export const MAX_TEAMMATES = 24;
 
 export type WakeKind = "room" | "dm";
 export type TeammateStatus = "hibernating" | "awake";
-export type HandoffRule = "broadcast" | "mentions";
+/**
+ * teams: everyone can read the thread; only an explicit address wakes peers.
+ * squad: no @ wakes the leader only; the leader's own @ fans out. Not an issue tracker.
+ */
+export type RoomRouting = "teams" | "squad";
+export type HandoffRule = "broadcast" | "mentions" | "addressed" | "leader" | "silent";
 
 /** Registry row. `hibernating` means the named Durable Object may sleep. */
 export type Teammate = {
@@ -59,6 +64,10 @@ export type RoomState = {
   opened: boolean;
   memberIds: string[];
   messages: RoomMessage[];
+  /** Missing on rooms opened before the toggle existed. Treat as teams. */
+  routing?: RoomRouting;
+  /** Squad leader. Missing means desk, then the first member. */
+  leaderId?: string;
 };
 
 export type PeerState = {
@@ -97,6 +106,11 @@ export type WakeRequest = {
   members: WakeMember[];
   /** Earlier conversation, oldest first. Does not include `text`. */
   thread: WakeTurn[];
+  /**
+   * Squad leader may hand work onward by writing @id in the reply.
+   * The room parses that text. This peer does not call the room back.
+   */
+  delegate?: boolean;
 };
 
 export type WakeResult = {
@@ -168,6 +182,8 @@ export const initialRoomState: RoomState = {
   opened: false,
   memberIds: [],
   messages: [],
+  routing: "teams",
+  leaderId: "desk",
 };
 
 export const initialPeerState: PeerState = {
@@ -250,70 +266,3 @@ export function filterTeammates(teammates: Teammate[], query: string): Teammate[
   );
 }
 
-/**
- * Fan-out rule for a room message.
- * No @  → broadcast every member.
- * Any @ → wake only mentioned members. Unknown tokens and people outside
- * the room are reported and not woken. `@` must start a token (after
- * whitespace or the beginning), so `a@b.com` is not a mention.
- * Matching is longest-prefix against id and displayName.
- */
-export function planHandoff(
-  text: string,
-  memberIds: string[],
-  teammates: Teammate[],
-): HandoffPlan {
-  const memberSet = new Set(memberIds);
-  const aliases = teammates
-    .flatMap((mate) => [
-      { token: mate.id.toLowerCase(), id: mate.id },
-      { token: mate.displayName.toLowerCase(), id: mate.id },
-    ])
-    .filter((alias) => alias.token.length > 0)
-    .sort((a, b) => b.token.length - a.token.length);
-
-  const targets: string[] = [];
-  const unknown: string[] = [];
-  const outsideRoom: string[] = [];
-  const seen = new Set<string>();
-  let sawMention = false;
-
-  for (let index = 0; index < text.length; index += 1) {
-    if (text[index] !== "@") continue;
-    if (!isMentionBoundary(text, index)) continue;
-    sawMention = true;
-    const rest = text.slice(index + 1);
-    const alias = aliases.find((candidate) => rest.toLowerCase().startsWith(candidate.token));
-    if (!alias) {
-      const raw = /^[^\s@]{1,40}/u.exec(rest)?.[0];
-      if (raw && !unknown.includes(raw)) unknown.push(raw);
-      index += raw ? raw.length : 0;
-      continue;
-    }
-    index += alias.token.length;
-    if (!memberSet.has(alias.id)) {
-      if (!outsideRoom.includes(alias.id)) outsideRoom.push(alias.id);
-      continue;
-    }
-    if (!seen.has(alias.id)) {
-      seen.add(alias.id);
-      targets.push(alias.id);
-    }
-  }
-
-  if (!sawMention) {
-    return {
-      rule: "broadcast",
-      targets: [...memberIds],
-      unknown: [],
-      outsideRoom: [],
-    };
-  }
-
-  return { rule: "mentions", targets, unknown, outsideRoom };
-}
-
-function isMentionBoundary(text: string, index: number): boolean {
-  if (index === 0) return true;
-  return /\s/u.test(text[index - 1] ?? "");
-}

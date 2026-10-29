@@ -3,7 +3,8 @@
 - `src/server.ts`：Worker 入口、`routeAgentRequest`、`POST /webhooks/ping`
 - `src/agents/desk.ts`：主 Think、上下文、技能、例程、记忆投影
 - `src/agents/researcher.ts`：被 `agentTool` 调起的第二个 Think
-- `src/agents/peer-types.ts`：并列同事的类型，以及广播 / @ 的 `planHandoff`
+- `src/agents/peer-types.ts`：并列同事的类型
+- `src/agents/routing.ts`：Teams / Squad 的叫醒表
 - `src/agents/registry.ts`：`TeammateRegistry`，种子 Desk、Researcher、NoteTaker
 - `src/agents/room.ts`：`RoomAgent`，按 id 交接，不嵌进 Think
 - `src/agents/fanout.ts`：广播和 `@` 共用的 `Promise.allSettled` 叫醒
