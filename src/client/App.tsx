@@ -12,14 +12,16 @@ import { ChatPane } from "./ChatPane";
 import { formatStamp, statusLabel } from "./format";
 import { MapPane } from "./MapPane";
 import { MemoryPane } from "./MemoryPane";
+import { PeersPane } from "./PeersPane";
 import { RoutinePane } from "./RoutinePane";
 
-type PaneId = "chat" | "memory" | "routine" | "map";
+type PaneId = "chat" | "memory" | "routine" | "peers" | "map";
 
 const PANES: Array<{ id: PaneId; label: string }> = [
   { id: "chat", label: "对话" },
   { id: "memory", label: "记忆" },
   { id: "routine", label: "例程" },
+  { id: "peers", label: "同事" },
   { id: "map", label: "架构" },
 ];
 
@@ -225,6 +227,7 @@ function DeskSession({
             }}
           />
         ) : null}
+        {pane === "peers" ? <PeersPane /> : null}
         {pane === "map" ? <MapPane skills={state.skills} /> : null}
       </main>
 

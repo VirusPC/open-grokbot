@@ -25,13 +25,20 @@
   "durable_objects": {
     "bindings": [
       { "name": "DeskAgent", "class_name": "DeskAgent" },
-      { "name": "ResearcherAgent", "class_name": "ResearcherAgent" }
+      { "name": "ResearcherAgent", "class_name": "ResearcherAgent" },
+      { "name": "TeammateRegistry", "class_name": "TeammateRegistry" },
+      { "name": "RoomAgent", "class_name": "RoomAgent" },
+      { "name": "PeerAgent", "class_name": "PeerAgent" }
     ]
   },
   "migrations": [
     {
       "tag": "v1",
       "new_sqlite_classes": ["DeskAgent", "ResearcherAgent"]
+    },
+    {
+      "tag": "v2-peer-agents",
+      "new_sqlite_classes": ["TeammateRegistry", "RoomAgent", "PeerAgent"]
     }
   ]
 }

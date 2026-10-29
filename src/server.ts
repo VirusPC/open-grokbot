@@ -1,15 +1,23 @@
 import { getAgentByName, routeAgentRequest } from "agents";
 import { DeskAgent } from "./agents/desk";
+import { PeerAgent } from "./agents/peer";
+import { TeammateRegistry } from "./agents/registry";
 import { ResearcherAgent } from "./agents/researcher";
+import { RoomAgent } from "./agents/room";
 import { normalizeSessionName, DEFAULT_SESSION } from "./agents/state";
+import { handlePeerRoutes } from "./peers/http";
 
-export { DeskAgent, ResearcherAgent };
+export { DeskAgent, ResearcherAgent, TeammateRegistry, RoomAgent, PeerAgent };
 
 /**
  * Worker entry. Agent WebSockets go through routeAgentRequest.
- * POST /webhooks/ping is the external-event door: it names a DeskAgent
- * instance and asks that Durable Object to record the ping, then
- * submitMessages() so Think runs a turn without a browser socket.
+ * POST /webhooks/ping names a DeskAgent and may submitMessages() so Think
+ * runs a turn without a browser socket. That path is parent-child only
+ * when the model calls agentTool.
+ *
+ * /api/teammates, /api/rooms/*, and /api/peers/* are the peer demo.
+ * They address TeammateRegistry, RoomAgent, and PeerAgent by name.
+ * They do not call agentTool and they do not start a Desk Think turn.
  */
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -18,7 +26,13 @@ export default {
     if (url.pathname === "/api/health") {
       return Response.json({
         ok: true,
-        agents: ["DeskAgent", "ResearcherAgent"],
+        agents: [
+          "DeskAgent",
+          "ResearcherAgent",
+          "TeammateRegistry",
+          "RoomAgent",
+          "PeerAgent",
+        ],
       });
     }
 
@@ -30,6 +44,14 @@ export default {
         );
       }
       return handlePing(request, env);
+    }
+
+    if (
+      url.pathname === "/api/teammates" ||
+      url.pathname.startsWith("/api/rooms/") ||
+      url.pathname.startsWith("/api/peers/")
+    ) {
+      return handlePeerRoutes(request, env);
     }
 
     return (

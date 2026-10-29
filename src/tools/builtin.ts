@@ -15,9 +15,12 @@ type MemoryHost = {
 };
 
 /**
- * Desk's server tools. `research` is a real child Think agent, not a
- * prompt-only role play: agentTool keeps the child Durable Object, streams
- * events to the parent, and returns the child's summary.
+ * Desk's server tools. `research` is the parent-child path: agentTool keeps
+ * a child ResearcherAgent, streams events to this Think turn, and returns
+ * the child's summary.
+ *
+ * Peer mode does not add a tool here. TeammateRegistry, RoomAgent, and
+ * PeerAgent are addressed by id from the room, outside this turn.
  */
 export function createDeskTools(host: MemoryHost): ToolSet {
   return {

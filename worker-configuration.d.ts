@@ -6,11 +6,14 @@ interface __BaseEnv_Env {
 	WORKERS_AI_MODEL: "@cf/zai-org/glm-4.7-flash";
 	DeskAgent: DurableObjectNamespace<import("./src/server").DeskAgent>;
 	ResearcherAgent: DurableObjectNamespace<import("./src/server").ResearcherAgent>;
+	TeammateRegistry: DurableObjectNamespace<import("./src/server").TeammateRegistry>;
+	RoomAgent: DurableObjectNamespace<import("./src/server").RoomAgent>;
+	PeerAgent: DurableObjectNamespace<import("./src/server").PeerAgent>;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/server");
-		durableNamespaces: "DeskAgent" | "ResearcherAgent";
+		durableNamespaces: "DeskAgent" | "ResearcherAgent" | "TeammateRegistry" | "RoomAgent" | "PeerAgent";
 	}
 	interface Env extends __BaseEnv_Env {}
 }

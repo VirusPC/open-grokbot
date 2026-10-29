@@ -1,6 +1,6 @@
 # 架构
 
-open-grokbot 是一个用来读代码的实验仓。浏览器只跟 **DeskAgent** 说话。DeskAgent 是 `@cloudflare/think` 的 `Think` 子类，模型循环、流式协议、消息树和工具合并都由 Think 完成，本仓不另写 agent loop。
+open-grokbot 是一个用来读代码的实验仓。对话页只跟 **DeskAgent** 说话。DeskAgent 是 `@cloudflare/think` 的 `Think` 子类，模型循环、流式协议、消息树和工具合并都由 Think 完成，本仓不另写 agent loop。同事页另外连接登记表和房间，那是第二条多 Agent 路径，见 [PEERS.md](./PEERS.md)。
 
 它不是任何专有机器人的客户端，也不实现其私有协议。下面的对照只说明「这类系统里常见的一层，在本仓落在哪个文件」。
 
@@ -28,18 +28,24 @@ DeskAgent  Durable Object（SQLite）
         │  agentTool(ResearcherAgent)
         ▼
 ResearcherAgent  另一个 Think Durable Object
+
+并列（同事页，不进上面的 Think 回合）
+  TeammateRegistry     发现。Desk 只是其中一行
+  RoomAgent            频道。广播，或只叫醒 @
+  PeerAgent            按 id 唤醒，规则回复写回房间
 ```
 
 `desktop/` 是可选的 Electron 窗口，在 macOS 上打开同一份 H5，默认指向本机实验桌 `http://127.0.0.1:43123`。`OPEN_GROKBOT_URL` 可以改成任意 http(s) 地址。它不在这条请求路径里，也不改 Think。
 
-每个会话名（默认 `lab`）是一个 Desk Durable Object。Researcher 不是第二个聊天窗口，而是 Desk 在回合中用工具拉起的子实例，有自己的 SQLite 和消息。
+每个会话名（默认 `lab`）是一个 Desk Durable Object。Researcher 不是第二个聊天窗口，而是 Desk 在回合中用工具拉起的子实例，有自己的 SQLite 和消息。并列路径里的同名 `PeerAgent` 是另一组实例，不是这个子回合。
 
 ## 对照
 
 | 概念 | 本仓 |
 | --- | --- |
 | 流式对话 | Think 内建回合 + 浏览器 `useAgent` / `useAgentChat`（`syncMessagesToServer: false`，因为 Think 的会话树才是原文） |
-| 多 Agent | `src/tools/builtin.ts` 里的 `agentTool(ResearcherAgent)`；子类在 `src/agents/researcher.ts` |
+| 父子委派 | `src/tools/builtin.ts` 里的 `agentTool(ResearcherAgent)`；子类在 `src/agents/researcher.ts` |
+| 并列同事 | `TeammateRegistry` + `RoomAgent` + `PeerAgent`。按 id 交接，不嵌在 Think 里。不是完整的分身记忆。见 [PEERS.md](./PEERS.md) |
 | Skills | `skills/<name>/SKILL.md`。`src/skills.ts` 用 Vite 插件的 `agents:skills/../skills` 打包，Desk `getSkills()` 返回这一份。模型用 `activate_skill` 按需加载 |
 | Memory | `configureContext()` 的可写 `memory` 块；`memory_write` / `memory_read` 以及面板的 `@callable remember` 写入 `lab_memory`，再投影回该块 |
 | Routines | `getScheduledTasks()` 声明 `heartbeat`，调度字符串是 `every 1 minute`（数量为 1 时用单数，解析器不接受 `minutes`）。handler 调用 `applyHeartbeat`，`setState` 后 H5 跟着变 |

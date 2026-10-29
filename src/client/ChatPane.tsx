@@ -55,7 +55,7 @@ export function ChatPane({
             <p className="eyebrow">Desk</p>
             <h2>从一句短话开始。</h2>
             <p>
-              流式回复走 Think。说「记住」会写记忆账本；让研究队友解释概念时，Desk 会调用 ResearcherAgent。
+              流式回复走 Think。说「记住」会写记忆账本；让研究队友解释概念时，Desk 用 agentTool 调用 Researcher。并列同事在「同事」页，不走这条工具。
             </p>
             <div className="chips">
               {SUGGESTIONS.map((suggestion) => (
