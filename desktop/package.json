@@ -1,0 +1,50 @@
+{
+  "name": "open-grokbot-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron window that loads the open-grokbot H5.",
+  "license": "MIT",
+  "author": "open-grokbot",
+  "type": "module",
+  "main": "src/main.js",
+  "productName": "open-grokbot",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "test": "node --test",
+    "dist:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir dmg"
+  },
+  "devDependencies": {
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "dev.open-grokbot.app",
+    "productName": "open-grokbot",
+    "asar": true,
+    "icon": "build/icon.png",
+    "files": [
+      "src/**/*.js",
+      "!src/**/*.test.js",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "darkModeSupport": true,
+      "target": [
+        "dir",
+        "dmg"
+      ]
+    }
+  }
+}

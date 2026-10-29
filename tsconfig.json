@@ -1,0 +1,7 @@
+{
+  "extends": "agents/tsconfig",
+  "compilerOptions": {
+    "types": ["node", "@cloudflare/workers-types", "vite/client"]
+  },
+  "include": ["src", "vite.config.ts", "worker-configuration.d.ts"]
+}
