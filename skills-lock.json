@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "skills": {
+    "edges": {
+      "source": "../../home/box/.local/lib/node_modules/@viruspc/edges/skills",
+      "sourceType": "local",
+      "computedHash": "648045d09363bd96d88e0294c27c3bb7dfb600d17958eb6309b01ea864fc4df9"
+    },
+    "edges-create-notes": {
+      "source": "../../home/box/.local/lib/node_modules/@viruspc/edges/skills",
+      "sourceType": "local",
+      "computedHash": "e5ac7844c205d852356c0fb7d2fc927490cc79e333b1dba124cf4c639f29f7c8"
+    },
+    "edges-create-tasks": {
+      "source": "../../home/box/.local/lib/node_modules/@viruspc/edges/skills",
+      "sourceType": "local",
+      "computedHash": "8b53b13f23420b5c34fbb73819134bc4ed1ee803b4d598810aa4c84b54040f2a"
+    },
+    "edges-langfuse-agent-tracing": {
+      "source": "../../home/box/.local/lib/node_modules/@viruspc/edges/skills",
+      "sourceType": "local",
+      "computedHash": "101f2b9fc648a1a32c37dd35be292b2a135790cbfe82f0e7787dbcaf010f0b1d"
+    },
+    "edges-memory-add-type": {
+      "source": "../../home/box/.local/lib/node_modules/@viruspc/edges/skills",
+      "sourceType": "local",
+      "computedHash": "7938d6860bb557b7426e4ebbfa01a1eef7d3ea3c078e7ea85d885e0d889886b2"
+    },
+    "edges-memory-ask": {
+      "source": "../../home/box/.local/lib/node_modules/@viruspc/edges/skills",
+      "sourceType": "local",
+      "computedHash": "bdae59e50c8a60ec4675024ca60a5c0ebdc2181bdd6bca445211ce1cb47084f1"
+    },
+    "edges-memory-remember": {
+      "source": "../../home/box/.local/lib/node_modules/@viruspc/edges/skills",
+      "sourceType": "local",
+      "computedHash": "875490148e45f1ff33f1863a7049f23ba321312e7a42ad6a415c3ef0b34b28d4"
+    },
+    "edges-onboarding": {
+      "source": "../../home/box/.local/lib/node_modules/@viruspc/edges/skills",
+      "sourceType": "local",
+      "computedHash": "037f2f71e3956fcc02a9703c211f5c70c2f0d01edc40b56a66754d453298e6ee"
+    },
+    "edges-tasks-classify": {
+      "source": "../../home/box/.local/lib/node_modules/@viruspc/edges/skills",
+      "sourceType": "local",
+      "computedHash": "de5c199ff00b316e70ca8b69352f116ec938661ddfdc9b7ba6048d0e5a3cfdc0"
+    }
+  }
+}
