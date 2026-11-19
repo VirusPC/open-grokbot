@@ -8,5 +8,5 @@
 <!-- edges-entries-local:start -->
 ## 本层内容
 
-- 暂无条目。
+- [macOS 桌面应用发版流程](<project_desktop_macos_release/INDEX.md>) — 要给 desktop/ 的 Electron 应用发版、改打包工作流或排查 Release 产物时读：改版本号合入 main 后推 v\* 标签，未签名，\-\-publish never 的原因。
 <!-- edges-entries-local:end -->
