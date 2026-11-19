@@ -15,13 +15,14 @@
     "start": "electron .",
     "dev": "electron .",
     "test": "node --test",
-    "dist:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir dmg"
+    "dist:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir dmg --publish never"
   },
   "devDependencies": {
     "electron": "^45.1.0",
     "electron-builder": "^26.18.0"
   },
   "build": {
+    "publish": null,
     "appId": "dev.open-grokbot.app",
     "productName": "open-grokbot",
     "asar": true,
