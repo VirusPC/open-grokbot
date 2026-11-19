@@ -1,0 +1,103 @@
+# Unsigned macOS build of desktop/.
+# electron-builder 26 publishes on its own in CI when GITHUB_TOKEN or a tag is
+# present (that implicit behavior goes away in v27). dist:mac passes
+# --publish never, and build.publish is null, so a missing publish token cannot
+# fail the job. Tag pushes upload the .dmg and zipped .app with this
+# workflow's GITHUB_TOKEN. workflow_dispatch only uploads Actions artifacts.
+name: Desktop macOS
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Package arm64 app and dmg
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run dist:mac -- --arm64
+
+      - name: Collect dmg and zipped app
+        working-directory: desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release/artifacts
+          version="$(node -p "require('./package.json').version")"
+          found_app=0
+          while IFS= read -r app; do
+            [ -n "$app" ] || continue
+            found_app=1
+            parent="$(basename "$(dirname "$app")")"
+            ditto -c -k --keepParent "$app" "release/artifacts/open-grokbot-${version}-${parent}.zip"
+          done < <(find release -name '*.app' -prune -print)
+          if [ "$found_app" -eq 0 ]; then
+            echo "no .app bundle under desktop/release" >&2
+            find release -maxdepth 3 -print >&2 || true
+            exit 1
+          fi
+          shopt -s nullglob
+          dmgs=(release/*.dmg)
+          if [ "${#dmgs[@]}" -eq 0 ]; then
+            echo "no .dmg under desktop/release" >&2
+            find release -maxdepth 2 -print >&2 || true
+            exit 1
+          fi
+          cp -v "${dmgs[@]}" release/artifacts/
+          ls -lh release/artifacts
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: open-grokbot-macos
+          path: desktop/release/artifacts/*
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          shopt -s nullglob
+          files=(release/artifacts/*)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "no files to publish" >&2
+            exit 1
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
+          else
+            gh release create "$tag" "${files[@]}" \
+              --title "$tag" \
+              --verify-tag \
+              --generate-notes
+          fi
